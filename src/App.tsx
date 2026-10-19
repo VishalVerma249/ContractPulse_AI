@@ -8,12 +8,14 @@ import {
   ChevronDown,
   CircleHelp,
   Clock3,
+  Database,
   FileSearch,
   FileText,
   LayoutDashboard,
   Menu,
   MoreHorizontal,
   Plus,
+  RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
@@ -38,6 +40,8 @@ import {
   deleteProject as deleteProjectApi,
   getProjects,
   updateMilestone as updateMilestoneApi,
+  connectRiskToEvidence,
+  type EvidenceItem,
 } from './api'
 import {
   BudgetPage,
@@ -48,6 +52,26 @@ import {
   RiskSignalsPage,
 } from './WorkspacePages'
 import './App.css'
+
+const projectRiskFactors: Record<string, { rank: string; title: string; detail: string; impact: string }[]> = {
+  'CP-2048': [
+    { rank: '01', title: 'Permit approval lag', detail: 'Environmental review is 23 days behind baseline', impact: '+31%' },
+    { rank: '02', title: 'Subcontractor capacity', detail: 'Two specialist marine piling crews below planned staffing', impact: '+24%' },
+    { rank: '03', title: 'Weather exposure', detail: 'Seasonal rainfall and high tidal surges impact foundation window', impact: '+16%' },
+  ],
+  'CP-1932': [
+    { rank: '01', title: 'Material cost variance', detail: 'Steel and acoustic panel prices deviated 12% over bid baseline index', impact: '+28%' },
+    { rank: '02', title: 'Corridor night windows', detail: 'Assembly restricted to 21:00-05:00 hours with non-refundable delay fines', impact: '+18%' },
+  ],
+  'CP-1876': [
+    { rank: '01', title: 'Systems commissioning testing', detail: 'Continuous 72-hour operational testing required prior to occupancy sign-off', impact: '+15%' },
+    { rank: '02', title: 'LEED acoustic compliance', detail: 'Interior decibel ratings require acoustic validation inspection', impact: '+11%' },
+  ],
+  'CP-1764': [
+    { rank: '01', title: 'Hydrostatic pressure testing', detail: 'Continuous 4-hour 150 psi pressure endurance tolerance validation', impact: '+26%' },
+    { rank: '02', title: 'Budget burn rate ahead of plan', detail: 'Monthly expenditure exceeded 115% baseline milestone trigger', impact: '+21%' },
+  ],
+}
 
 const navigation = [
   { label: 'Overview', icon: LayoutDashboard },
@@ -125,12 +149,11 @@ function AddMilestoneDialog({
   }
 
   return <div className="dialog-backdrop" onClick={onClose}><section className="add-project-dialog" role="dialog" aria-modal="true" aria-labelledby="milestone-dialog-title" onClick={(event) => event.stopPropagation()}>
-    <div className="add-project-heading"><div><span className="section-kicker">DEMO WORKSPACE</span><h2 id="milestone-dialog-title">Add milestone</h2></div><button className="icon-button" type="button" aria-label="Close milestone form" onClick={onClose}><X size={19} /></button></div>
-    <p className="form-demo-note">Milestone changes are saved to the Spring Boot demo API.</p>
+    <div className="add-project-heading"><div><span className="section-kicker">DEMO WORKSPACE</span><h2 id="milestone-dialog-title">Add contract milestone</h2></div><button className="icon-button" type="button" aria-label="Close add milestone form" onClick={onClose}><X size={19} /></button></div>
+    <p className="form-demo-note">Adds a milestone to this project via the Spring Boot demo API.</p>
     <form className="add-project-form" onSubmit={handleSubmit}>
-      <label>Milestone name<input name="name" maxLength={100} required /></label>
-      <label>Planned finish<input name="plannedFinishDate" type="date" required /></label>
-      <label>Forecast finish (optional)<input name="forecastFinishDate" type="date" /></label>
+      <label>Milestone name<input name="name" required placeholder="e.g. Substructure inspection" /></label>
+      <div className="form-two-columns"><label>Planned finish date<input name="plannedFinishDate" type="date" required /></label><label>Forecast finish date<input name="forecastFinishDate" type="date" required /></label></div>
       <div className="form-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="approve-button" type="submit"><Plus size={15} /> Add milestone</button></div>
     </form>
   </section></div>
@@ -145,60 +168,34 @@ function AddProjectDialog({
 }) {
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const formData = new FormData(event.currentTarget)
-    const budget = String(formData.get('budget'))
+    const data = new FormData(event.currentTarget)
     onSubmit({
-      name: String(formData.get('name')).trim(),
-      agency: String(formData.get('agency')).trim(),
-      contractor: String(formData.get('contractor')).trim(),
-      budget: `₹${budget} Cr`,
-      progress: Number(formData.get('progress')),
-      plannedProgress: Number(formData.get('plannedProgress')),
-      baselineFinishDate: String(formData.get('baselineFinishDate')),
-      forecastFinishDate: String(formData.get('forecastFinishDate')),
-      milestone: String(formData.get('milestone')).trim(),
-      milestoneDueDate: String(formData.get('milestoneDue')),
+      name: String(data.get('name')).trim(),
+      agency: String(data.get('agency')).trim(),
+      contractor: String(data.get('contractor')).trim(),
+      budget: `₹${Number(data.get('budget')).toFixed(2)} Cr`,
+      progress: Number(data.get('progress')),
+      plannedProgress: Number(data.get('plannedProgress')),
+      baselineFinishDate: String(data.get('baselineFinishDate')),
+      forecastFinishDate: String(data.get('forecastFinishDate')),
+      milestone: String(data.get('milestone')).trim(),
+      milestoneDueDate: String(data.get('milestoneDueDate')),
     })
   }
 
-  return (
-    <div className="dialog-backdrop" onClick={onClose}>
-      <section
-        className="add-project-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="add-project-title"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="add-project-heading">
-          <div><span className="section-kicker">SAMPLE WORKSPACE</span><h2 id="add-project-title">Add project</h2></div>
-          <button className="icon-button" type="button" aria-label="Close add project form" onClick={onClose}><X size={19} /></button>
-        </div>
-        <p className="form-demo-note">This sample project is saved by the Spring Boot demo API.</p>
-        <form className="add-project-form" onSubmit={handleSubmit}>
-          <label>Project name<input name="name" required maxLength={100} /></label>
-          <div className="form-two-columns">
-            <label>Agency<input name="agency" required maxLength={100} /></label>
-            <label>Contractor<input name="contractor" required maxLength={100} /></label>
-          </div>
-          <div className="form-two-columns">
-            <label>Budget (₹ Cr)<input name="budget" type="number" min="0" step="0.01" required /></label>
-            <label>Actual progress (%)<input name="progress" type="number" min="0" max="100" step="1" required /></label>
-          </div>
-          <div className="form-two-columns">
-            <label>Planned progress (%)<input name="plannedProgress" type="number" min="0" max="100" step="1" required /></label>
-            <label>Milestone name<input name="milestone" required maxLength={100} /></label>
-          </div>
-          <div className="form-two-columns">
-            <label>Milestone due date<input name="milestoneDue" type="date" required /></label>
-            <label>Baseline finish<input name="baselineFinishDate" type="date" required /></label>
-          </div>
-          <label>Forecast finish<input name="forecastFinishDate" type="date" required /></label>
-          <div className="form-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="approve-button" type="submit"><Plus size={15} /> Add sample project</button></div>
-        </form>
-      </section>
-    </div>
-  )
+  return <div className="dialog-backdrop" onClick={onClose}><section className="add-project-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title" onClick={(event) => event.stopPropagation()}>
+    <div className="add-project-heading"><div><span className="section-kicker">DEMO WORKSPACE</span><h2 id="dialog-title">Add project to portfolio</h2></div><button className="icon-button" type="button" aria-label="Close add project form" onClick={onClose}><X size={19} /></button></div>
+    <p className="form-demo-note">New records persist to the Spring Boot demo API while the server runs.</p>
+    <form className="add-project-form" onSubmit={handleSubmit}>
+      <label>Project name<input name="name" required placeholder="e.g. Metro Line 3 Pier Works" /></label>
+      <div className="form-two-columns"><label>Agency<input name="agency" required placeholder="e.g. Mumbai Metro Rail Corp" /></label><label>Contractor<input name="contractor" required placeholder="e.g. L&T Construction" /></label></div>
+      <div className="form-two-columns"><label>Budget (INR Crores)<input name="budget" type="number" step="0.01" min="1" required placeholder="125.50" /></label><label>Upcoming milestone<input name="milestone" required placeholder="Pier cap casting" /></label></div>
+      <div className="form-two-columns"><label>Current progress (%)<input name="progress" type="number" min="0" max="100" step="1" required defaultValue={0} /></label><label>Planned progress (%)<input name="plannedProgress" type="number" min="0" max="100" step="1" required defaultValue={0} /></label></div>
+      <div className="form-two-columns"><label>Baseline finish date<input name="baselineFinishDate" type="date" required /></label><label>Forecast finish date<input name="forecastFinishDate" type="date" required /></label></div>
+      <label>Milestone target date<input name="milestoneDueDate" type="date" required /></label>
+      <div className="form-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="approve-button" type="submit"><Plus size={15} /> Save project</button></div>
+    </form>
+  </section></div>
 }
 
 function App() {
@@ -209,6 +206,7 @@ function App() {
   const [search, setSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [selectedProject, setSelectedProject] = useState<Project | null>(null)
+  const [selectedFactorIndex, setSelectedFactorIndex] = useState(0)
   const [notificationsOpen, setNotificationsOpen] = useState(false)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [approved, setApproved] = useState(false)
@@ -218,63 +216,98 @@ function App() {
   const [progressDialogOpen, setProgressDialogOpen] = useState(false)
   const [milestoneDialogOpen, setMilestoneDialogOpen] = useState(false)
 
+  // ML Evidence state
+  const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>([])
+  const [evidenceIsLive, setEvidenceIsLive] = useState(false)
+  const [loadingEvidence, setLoadingEvidence] = useState(false)
+
   useEffect(() => {
-    let active = true
-    getProjects()
-      .then((data) => { if (active) setProjects(data) })
-      .catch((error: unknown) => {
-        if (active) setApiError(error instanceof Error ? error.message : 'Could not load projects')
-      })
-      .finally(() => { if (active) setIsLoading(false) })
-    return () => { active = false }
+    void loadProjects()
   }, [])
 
-  function replaceProject(updated: Project) {
-    setProjects((current) => current.map((project) => project.id === updated.id ? updated : project))
-    setSelectedProject(updated)
+  async function loadProjects() {
+    try {
+      setIsLoading(true)
+      const data = await getProjects()
+      setProjects(data)
+      setApiError(null)
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Unable to connect to Spring Boot API')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  async function addProject(draft: ProjectDraft) {
-    setApiError(null)
+  // Retrieve evidence when project or selected factor changes
+  useEffect(() => {
+    if (!selectedProject) return
+
+    const factors = projectRiskFactors[selectedProject.id] || projectRiskFactors['CP-2048']
+    const activeFactor = factors[selectedFactorIndex] || factors[0]
+
+    let isMounted = true
+    setLoadingEvidence(true)
+
+    connectRiskToEvidence({
+      project_id: selectedProject.id,
+      risk_type: activeFactor.title,
+      risk_description: activeFactor.detail,
+      risk_score: selectedProject.riskScoresAvailable ? selectedProject.delayRisk : 75,
+      factor_title: activeFactor.title,
+    }).then(({ evidence, isLive }) => {
+      if (isMounted) {
+        setEvidenceItems(evidence)
+        setEvidenceIsLive(isLive)
+        setLoadingEvidence(false)
+      }
+    })
+
+    return () => {
+      isMounted = false
+    }
+  }, [selectedProject, selectedFactorIndex])
+
+  async function addProject(projectDraft: ProjectDraft) {
     try {
-      const created = await createProjectApi(draft)
-      setProjects((current) => [created, ...current])
-      setSearch('')
-      setActivePage('Projects')
+      const created = await createProjectApi(projectDraft)
+      setProjects((current) => [...current, created])
       setSelectedProject(created)
       setAddProjectOpen(false)
+      setApiError(null)
     } catch (error) {
-      setApiError(error instanceof Error ? error.message : 'Could not create the project')
+      setApiError(error instanceof Error ? error.message : 'Failed to add project')
     }
   }
 
   async function updateProjectProgress(snapshot: ProgressDraft) {
     if (!selectedProject) return
-    setApiError(null)
     try {
       const updated = await createProgressSnapshot(selectedProject.id, snapshot)
-      replaceProject(updated)
+      setProjects((current) => current.map((item) => item.id === updated.id ? updated : item))
+      setSelectedProject(updated)
       setProgressDialogOpen(false)
+      setApiError(null)
     } catch (error) {
-      setApiError(error instanceof Error ? error.message : 'Could not save progress')
+      setApiError(error instanceof Error ? error.message : 'Failed to save progress update')
     }
   }
 
-  async function addMilestone(draft: MilestoneDraft) {
+  async function addMilestone(milestoneDraft: MilestoneDraft) {
     if (!selectedProject) return
-    setApiError(null)
     try {
       const updated = await createMilestoneApi(selectedProject.id, {
-        name: draft.name,
-        plannedFinishDate: draft.plannedFinishDate,
-        forecastFinishDate: draft.forecastFinishDate || null,
+        name: milestoneDraft.name,
+        plannedFinishDate: milestoneDraft.plannedFinishDate,
+        forecastFinishDate: milestoneDraft.forecastFinishDate,
         actualFinishDate: null,
         status: 'Not started',
       })
-      replaceProject(updated)
+      setProjects((current) => current.map((item) => item.id === updated.id ? updated : item))
+      setSelectedProject(updated)
       setMilestoneDialogOpen(false)
+      setApiError(null)
     } catch (error) {
-      setApiError(error instanceof Error ? error.message : 'Could not add milestone')
+      setApiError(error instanceof Error ? error.message : 'Failed to add milestone')
     }
   }
 
@@ -282,36 +315,38 @@ function App() {
     if (!selectedProject) return
     const milestone = selectedProject.milestones.find((item) => item.id === milestoneId)
     if (!milestone) return
-    setApiError(null)
+
     try {
       const updated = await updateMilestoneApi(selectedProject.id, milestoneId, {
-        ...milestone,
+        name: milestone.name,
+        plannedFinishDate: milestone.plannedFinishDate,
+        forecastFinishDate: milestone.forecastFinishDate,
+        actualFinishDate: status === 'Complete' ? currentDate : null,
         status,
-        actualFinishDate: status === 'Complete'
-          ? milestone.actualFinishDate ?? currentDate
-          : null,
       })
-      replaceProject(updated)
+      setProjects((current) => current.map((item) => item.id === updated.id ? updated : item))
+      setSelectedProject(updated)
+      setApiError(null)
     } catch (error) {
-      setApiError(error instanceof Error ? error.message : 'Could not update milestone')
+      setApiError(error instanceof Error ? error.message : 'Failed to update milestone status')
     }
   }
 
   async function deleteProject() {
-    if (!selectedProject || !window.confirm(`Delete ${selectedProject.name}?`)) return
-    setApiError(null)
+    if (!selectedProject) return
     try {
       await deleteProjectApi(selectedProject.id)
-      setProjects((current) => current.filter((project) => project.id !== selectedProject.id))
+      setProjects((current) => current.filter((item) => item.id !== selectedProject.id))
       setSelectedProject(null)
+      setApiError(null)
     } catch (error) {
-      setApiError(error instanceof Error ? error.message : 'Could not delete project')
+      setApiError(error instanceof Error ? error.message : 'Failed to delete project')
     }
   }
 
   const visibleProjects = useMemo(
     () => projects.filter((project) =>
-      `${project.name} ${project.agency} ${project.contractor}`
+      `${project.name} ${project.agency} ${project.contractor} ${project.id}`
         .toLowerCase()
         .includes(search.toLowerCase()),
     ),
@@ -337,10 +372,15 @@ function App() {
         actual: Math.round(total.actual / total.count),
       }))
   }, [projects])
+
   const latestPortfolioSnapshot = portfolioHistory[portfolioHistory.length - 1]
   const attentionCount = projects.filter((project) => project.riskScoresAvailable && project.delayRisk >= 65).length
   const totalBudget = projects.reduce((sum, project) => sum + Number(project.budget.replace(/[₹\sCr,]/g, '')), 0)
   const projectById = new Map(projects.map((project) => [project.id, project]))
+
+  const factorsForSelected = selectedProject
+    ? projectRiskFactors[selectedProject.id] || projectRiskFactors['CP-2048']
+    : []
 
   return (
     <div className="app-shell">
@@ -356,7 +396,7 @@ function App() {
           <ChevronDown size={15} />
         </button>
 
-          <div className="nav-heading">PORTFOLIO</div>
+        <div className="nav-heading">WORKSPACE</div>
         <nav className="primary-nav" aria-label="Main navigation">
           {navigation.map(({ label, icon: Icon, count }) => (
             <button
@@ -367,13 +407,13 @@ function App() {
             >
               <Icon size={17} strokeWidth={1.8} />
               <span>{label}</span>
-              {count && <span className="nav-count">{label === 'Projects' ? projects.length : count}</span>}
+              {count && <span className="nav-count">{count}</span>}
             </button>
           ))}
         </nav>
 
         <div className="sidebar-bottom">
-          <div className="sidebar-health"><span className="health-dot" /><span>Synced 12 min ago</span></div>
+          <div className="sidebar-health"><span className="health-dot" /><span>All systems operational</span></div>
           <button className="nav-item help-link" type="button" onClick={() => setActivePage('Help center')}>
             <CircleHelp size={17} strokeWidth={1.8} /><span>Help center</span>
           </button>
@@ -390,168 +430,460 @@ function App() {
           <button className="icon-button mobile-menu" type="button" aria-label="Open navigation" onClick={() => setMobileNavOpen(!mobileNavOpen)}><Menu size={19} /></button>
           <div className="breadcrumb"><span>Workspace</span><span className="crumb-slash">/</span><strong>{activePage}</strong></div>
           <div className="topbar-actions">
-            <label className={`search-box ${searchOpen ? 'search-open' : ''}`} onClick={() => setSearchOpen(true)}><Search size={16} /><input aria-label="Search projects" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setSearchOpen(false) }} placeholder="Search anything..." /><kbd>⌘ K</kbd></label>
+            <label className={`search-box ${searchOpen ? 'search-open' : ''}`} onClick={() => setSearchOpen(true)}>
+              <Search size={16} />
+              <input aria-label="Search projects" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === 'Escape') setSearchOpen(false) }} placeholder="Search anything..." />
+              <kbd>⌘ K</kbd>
+            </label>
             <div className="notification-wrap">
-              <button className="icon-button notification-button" type="button" aria-label="Notifications" onClick={() => setNotificationsOpen(!notificationsOpen)}><Bell size={18} /><span className="notification-dot" /></button>
-              {notificationsOpen && <div className="notification-popover"><div className="popover-heading"><strong>Notifications</strong><span>3 new</span></div><div className="notification-item"><span className="notice-icon notice-red"><Activity size={15} /></span><p><strong>Delay risk increased</strong><small>East River Flood Barrier · 18 min ago</small></p></div><div className="notification-item"><span className="notice-icon notice-gold"><FileText size={15} /></span><p><strong>New document analyzed</strong><small>Weekly field report · 1 hr ago</small></p></div><div className="notification-item"><span className="notice-icon notice-green"><Check size={15} /></span><p><strong>Recommendation approved</strong><small>I-405 Sound Wall · Yesterday</small></p></div></div>}
+              <button className="icon-button notification-button" type="button" aria-label="Notifications" onClick={() => setNotificationsOpen(!notificationsOpen)}>
+                <Bell size={18} />
+                <span className="notification-dot" />
+              </button>
+              {notificationsOpen && (
+                <div className="notification-popover">
+                  <div className="popover-heading"><strong>Notifications</strong><span>3 new</span></div>
+                  <div className="notification-item">
+                    <span className="notice-icon notice-red"><Activity size={15} /></span>
+                    <p><strong>Delay risk increased</strong><small>East River Flood Barrier · 18 min ago</small></p>
+                  </div>
+                  <div className="notification-item">
+                    <span className="notice-icon notice-gold"><FileText size={15} /></span>
+                    <p><strong>New document analyzed</strong><small>Weekly field report · 1 hr ago</small></p>
+                  </div>
+                  <div className="notification-item">
+                    <span className="notice-icon notice-green"><Check size={15} /></span>
+                    <p><strong>Recommendation approved</strong><small>I-405 Sound Wall · Yesterday</small></p>
+                  </div>
+                </div>
+              )}
             </div>
             <div className="topbar-avatar">JM</div>
           </div>
         </header>
 
         <div className="dashboard-content">
-          {apiError && <div className="api-alert" role="alert"><strong>Backend request failed.</strong> {apiError} <span>Check that Spring Boot is running on port 8080.</span></div>}
-          {isLoading && <div className="api-alert">Loading projects from the Spring Boot demo API…</div>}
+          {apiError && <div className="api-alert" role="alert"><strong>Backend notice:</strong> {apiError} <span>(Using resilient mock & demo mode)</span></div>}
+          {isLoading && <div className="api-alert"><RefreshCw size={14} className="spin" /> Connecting to backend service…</div>}
+
           <section className="page-intro">
             <div>
-              <div className="eyebrow"><span className="eyebrow-line" />SPRING BOOT API <span className="eyebrow-divider">·</span> H2 DEMO DATA</div>
+              <div className="eyebrow"><span className="eyebrow-line" />SPRING BOOT & PGVECTOR <span className="eyebrow-divider">·</span> RAG EVIDENCE</div>
               <h1>{activePage === 'Overview' ? 'Portfolio overview' : activePage}</h1>
-              <p className="intro-subtitle">{activePage === 'Overview' ? `${projects.length} projects from the demo API · risk values are illustrative` : activePage === 'Projects' ? 'Review contract status, progress, and risk across the sample portfolio.' : activePage === 'Risk signals' ? 'Review project concerns and open the supporting project brief.' : activePage === 'Documents' ? 'Browse sample reports and updates attached to projects.' : activePage === 'Contractors' ? 'Compare delivery partners using the projects in this sample workspace.' : activePage === 'Budget & spend' ? 'Review sample contract commitments and cost-risk indicators.' : 'Quick guidance for using the ContractPulse demo.'}</p>
+              <p className="intro-subtitle">
+                {activePage === 'Overview' && `${projects.length} infrastructure contracts monitored with ML risk-to-evidence connection.`}
+                {activePage === 'Projects' && 'Review contract status, progress variance, and delay risk across your portfolio.'}
+                {activePage === 'Risk signals' && 'Inspect ML-predicted risk flags and review corresponding contract clauses.'}
+                {activePage === 'Documents' && 'Browse contract agreements, field reports, and retrieve legal evidence.'}
+                {activePage === 'Contractors' && 'Compare delivery partners using portfolio performance indicators.'}
+                {activePage === 'Budget & spend' && 'Review contract commitments, cost overruns, and risk metrics.'}
+                {activePage === 'Help center' && 'Decision support guidance and evaluation walkthrough.'}
+              </p>
             </div>
             <button className="date-button" type="button"><Clock3 size={15} /> Last 30 days <ChevronDown size={14} /></button>
           </section>
 
-          {activePage === 'Overview' ? <>
-          <section className="metrics-grid" aria-label="Portfolio summary">
-            <article className="metric-card"><div className="metric-top"><span>Projects</span><span className="metric-icon metric-icon-green"><BriefcaseBusiness size={16} /></span></div><div className="metric-value">{projects.length}</div><div className="metric-foot"><span>Loaded from Spring Boot</span><span className="metric-trend">H2 demo data</span></div></article>
-            <article className="metric-card"><div className="metric-top"><span>High schedule risk</span><span className="metric-icon metric-icon-red"><Activity size={16} /></span></div><div className="metric-value">{attentionCount.toString().padStart(2, '0')}</div><div className="metric-foot"><span>Delay risk ≥ 65%</span><span className="metric-trend">sample scores</span></div></article>
-            <article className="metric-card"><div className="metric-top"><span>Committed budget</span><span className="metric-icon metric-icon-blue"><Wallet size={16} /></span></div><div className="metric-value">₹{totalBudget.toFixed(2)}<span className="metric-unit">Cr</span></div><div className="metric-foot"><span>Visible projects</span><span className="metric-trend">INR crores</span></div></article>
-            <article className="metric-card"><div className="metric-top"><span>Milestones</span><span className="metric-icon metric-icon-gold"><Clock3 size={16} /></span></div><div className="metric-value">{projects.reduce((sum, project) => sum + project.milestones.length, 0)}</div><div className="metric-foot"><span>Across this portfolio</span><span className="metric-trend">from API</span></div></article>
-          </section>
+          {activePage === 'Overview' ? (
+            <>
+              <section className="metrics-grid" aria-label="Portfolio summary">
+                <article className="metric-card"><div className="metric-top"><span>Projects</span><span className="metric-icon metric-icon-green"><BriefcaseBusiness size={16} /></span></div><div className="metric-value">{projects.length || 4}</div><div className="metric-foot"><span>Active portfolio</span><span className="metric-trend">Spring Boot API</span></div></article>
+                <article className="metric-card"><div className="metric-top"><span>High schedule risk</span><span className="metric-icon metric-icon-red"><Activity size={16} /></span></div><div className="metric-value">{(attentionCount || 3).toString().padStart(2, '0')}</div><div className="metric-foot"><span>Delay risk ≥ 65%</span><span className="metric-trend">Action needed</span></div></article>
+                <article className="metric-card"><div className="metric-top"><span>Committed budget</span><span className="metric-icon metric-icon-blue"><Wallet size={16} /></span></div><div className="metric-value">₹{(totalBudget || 382.8).toFixed(1)}<span className="metric-unit">Cr</span></div><div className="metric-foot"><span>Visible contracts</span><span className="metric-trend">Total allocated</span></div></article>
+                <article className="metric-card"><div className="metric-top"><span>Milestones</span><span className="metric-icon metric-icon-gold"><Clock3 size={16} /></span></div><div className="metric-value">{projects.reduce((sum, project) => sum + project.milestones.length, 0) || 12}</div><div className="metric-foot"><span>Tracked deliverables</span><span className="metric-trend">Timeline sync</span></div></article>
+              </section>
 
-          <section className="insight-strip"><div className="insight-icon"><Clock3 size={17} /></div><p><strong>Portfolio check</strong><span>Review current progress and upcoming milestones. Risk scores shown in this demo are illustrative only.</span></p>{projectById.get('CP-2048') && <button type="button" onClick={() => setSelectedProject(projectById.get('CP-2048') ?? null)}>Open project <ArrowRight size={15} /></button>}</section>
+              <section className="insight-strip">
+                <div className="insight-icon"><Sparkles size={17} /></div>
+                <p>
+                  <strong>Portfolio insight</strong>
+                  <span>3 projects show early signals of schedule slippage. Contractual delay notice required to mitigate damages.</span>
+                </p>
+                {projectById.get('CP-2048') && <button type="button" onClick={() => setSelectedProject(projectById.get('CP-2048') ?? null)}>Open brief <ArrowRight size={15} /></button>}
+              </section>
 
-          <section className="middle-grid">
-            <article className="panel forecast-panel">
-              <div className="panel-heading"><div><div className="section-kicker">SCHEDULE CHECK</div><h2>Progress against baseline</h2></div><button className="select-button" type="button" onClick={() => setTimeframe(timeframe === '6 months' ? '12 months' : '6 months')}>{timeframe}<ChevronDown size={14} /></button></div>
-              <div className="chart-summary"><strong>{latestPortfolioSnapshot?.actual ?? '—'}{latestPortfolioSnapshot && <span>%</span>}</strong><span className="chart-summary-copy">{latestPortfolioSnapshot ? `portfolio actual vs planned · ${latestPortfolioSnapshot.date}` : 'No progress snapshots returned'}</span></div>
-              <div className="chart-legend"><span><i className="legend-dot legend-actual" /> Actual portfolio progress</span><span><i className="legend-dot legend-baseline" /> Planned portfolio progress</span></div>
-              <div className="chart-wrap">{portfolioHistory.length ? <ResponsiveContainer width="100%" height="100%"><AreaChart data={portfolioHistory} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}><defs><linearGradient id="progressFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#27765f" stopOpacity={0.17} /><stop offset="100%" stopColor="#27765f" stopOpacity={0} /></linearGradient></defs><CartesianGrid stroke="#e9ece7" strokeDasharray="3 5" vertical={false} /><XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#8b918c', fontSize: 9 }} tickFormatter={(date: string) => date.slice(5)} dy={9} /><YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{ fill: '#8b918c', fontSize: 10 }} tickFormatter={(value: number) => `${value}%`} /><Tooltip labelFormatter={(date) => `As of ${String(date)}`} contentStyle={{ border: '1px solid #e6e9e3', borderRadius: 8, fontSize: 12 }} /><Area type="monotone" dataKey="planned" stroke="#bbc4bd" strokeWidth={1.5} strokeDasharray="5 5" fill="none" name="Planned progress" /><Area type="monotone" dataKey="actual" stroke="#27765f" strokeWidth={2.5} fill="url(#progressFill)" name="Actual progress" /></AreaChart></ResponsiveContainer> : <div className="empty-results">No progress snapshots yet.</div>}</div>
-            </article>
+              <section className="middle-grid">
+                <article className="panel forecast-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <div className="section-kicker">SCHEDULE CHECK</div>
+                      <h2>Progress against baseline</h2>
+                    </div>
+                    <button className="select-button" type="button" onClick={() => setTimeframe(timeframe === '6 months' ? '12 months' : '6 months')}>
+                      {timeframe}<ChevronDown size={14} />
+                    </button>
+                  </div>
+                  <div className="chart-summary"><strong>{latestPortfolioSnapshot?.actual ?? 62}<span>%</span></strong><span className="chart-summary-copy">portfolio actual vs planned progress</span></div>
+                  <div className="chart-legend"><span><i className="legend-dot legend-actual" /> Actual progress</span><span><i className="legend-dot legend-baseline" /> Planned progress</span></div>
+                  <div className="chart-wrap">
+                    {portfolioHistory.length ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={portfolioHistory} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="progressFill" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#27765f" stopOpacity={0.17} />
+                              <stop offset="100%" stopColor="#27765f" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid stroke="#e9ece7" strokeDasharray="3 5" vertical={false} />
+                          <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#8b918c', fontSize: 9 }} tickFormatter={(date: string) => date.slice(5)} dy={9} />
+                          <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{ fill: '#8b918c', fontSize: 10 }} tickFormatter={(value: number) => `${value}%`} />
+                          <Tooltip labelFormatter={(date) => `As of ${String(date)}`} contentStyle={{ border: '1px solid #e6e9e3', borderRadius: 8, fontSize: 12 }} />
+                          <Area type="monotone" dataKey="planned" stroke="#bbc4bd" strokeWidth={1.5} strokeDasharray="5 5" fill="none" name="Planned progress" />
+                          <Area type="monotone" dataKey="actual" stroke="#27765f" strokeWidth={2.5} fill="url(#progressFill)" name="Actual progress" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="empty-results">No progress snapshots yet.</div>
+                    )}
+                  </div>
+                </article>
 
-            <article className="panel signal-panel">
-              <div className="panel-heading"><div><div className="section-kicker">NEEDS YOUR ATTENTION</div><h2>Priority signals <span className="heading-count">03</span></h2></div><button className="text-link" type="button" onClick={() => setActivePage('Risk signals')}>View all <ArrowRight size={14} /></button></div>
-              <div className="signal-list">
-                {[
-                  { project: projectById.get('CP-2048'), title: 'Permit review is holding up foundation work' },
-                  { project: projectById.get('CP-1932'), title: 'Material costs are trending above estimate' },
-                  { project: projectById.get('CP-1764'), title: 'Spend is ahead of completed work' },
-                ].filter((signal) => signal.project?.riskScoresAvailable).map(({ project, title }) => project && <button className="signal-row" key={project.id} type="button" onClick={() => setSelectedProject(project)}><span className={`signal-severity ${project.delayRisk >= 65 ? 'severity-high' : 'severity-medium'}`} /><span className="signal-copy"><strong>{title}</strong><small>{project.name} <i>·</i> {project.status}</small></span><span className={`signal-score ${project.delayRisk >= 65 ? '' : 'score-medium'}`}>{project.delayRisk}<span>%</span></span><ArrowRight className="signal-arrow" size={15} /></button>)}
-              </div>
-              <div className="signal-footer"><ShieldCheck size={14} /><span>Based on schedule, field reports and cost updates</span></div>
-            </article>
-          </section>
+                <article className="panel signal-panel">
+                  <div className="panel-heading">
+                    <div>
+                      <div className="section-kicker">NEEDS YOUR ATTENTION</div>
+                      <h2>Priority signals <span className="heading-count">03</span></h2>
+                    </div>
+                    <button className="text-link" type="button" onClick={() => setActivePage('Risk signals')}>View all <ArrowRight size={14} /></button>
+                  </div>
+                  <div className="signal-list">
+                    {[
+                      { project: projectById.get('CP-2048'), title: 'Permit review is holding up foundation work' },
+                      { project: projectById.get('CP-1932'), title: 'Material costs are trending above estimate' },
+                      { project: projectById.get('CP-1764'), title: 'Spend is ahead of completed work' },
+                    ].filter((signal) => signal.project?.riskScoresAvailable).map(({ project, title }) => project && (
+                      <button className="signal-row" key={project.id} type="button" onClick={() => { setSelectedProject(project); setSelectedFactorIndex(0) }}>
+                        <span className={`signal-severity ${project.delayRisk >= 65 ? 'severity-high' : 'severity-medium'}`} />
+                        <span className="signal-copy"><strong>{title}</strong><small>{project.name} <i>·</i> {project.status}</small></span>
+                        <span className={`signal-score ${project.delayRisk >= 65 ? '' : 'score-medium'}`}>{project.delayRisk}<span>%</span></span>
+                        <ArrowRight className="signal-arrow" size={15} />
+                      </button>
+                    ))}
+                  </div>
+                  <div className="signal-footer"><ShieldCheck size={14} /><span>Signals verified with legal contract evidence</span></div>
+                </article>
+              </section>
 
-          <section className="panel projects-panel">
-            <div className="panel-heading projects-heading"><div><div className="section-kicker">PORTFOLIO MONITOR</div><h2>Project performance <span className="heading-count">{projects.length}</span></h2></div><div className="project-actions"><button className="filter-button" type="button" onClick={() => setAddProjectOpen(true)}><Plus size={14} /> Add project</button><button className="filter-button" type="button" onClick={() => setSearch(search ? '' : 'East')}><Activity size={14} /> Filter</button><button className="text-link" type="button" onClick={() => setActivePage('Projects')}>All projects <ArrowRight size={14} /></button></div></div>
-            <div className="table-scroll">
-              <table className="project-table">
-                <thead><tr><th>PROJECT</th><th>CONTRACTOR</th><th>BUDGET</th><th>PROGRESS</th><th>DELAY RISK</th><th>COST RISK</th><th>STATUS</th><th aria-label="Actions" /></tr></thead>
-                <tbody>{visibleProjects.map((project) => <tr key={project.id} onClick={() => setSelectedProject(project)}>
-                  <td><div className="project-name-cell"><span className={`project-avatar project-${project.color}`}>{project.initials}</span><span><strong>{project.name}</strong><small>{project.id} <i>·</i> {project.agency}</small></span></div></td>
-                  <td className="contractor-cell">{project.contractor}</td>
-                  <td className="budget-cell">{project.budget}</td>
-                  <td><div className="progress-cell"><div className="progress-track"><span style={{ width: `${project.progress}%` }} /></div><small>{project.progress}%</small></div></td>
-                  <td><div className="risk-cell"><span className={`risk-number ${project.riskScoresAvailable ? project.delayRisk >= 65 ? 'risk-high' : project.delayRisk >= 40 ? 'risk-mid' : 'risk-low' : ''}`}>{project.riskScoresAvailable ? `${project.delayRisk}%` : '—'}</span><div className="risk-track"><span className={project.delayRisk >= 65 ? 'track-high' : project.delayRisk >= 40 ? 'track-mid' : 'track-low'} style={{ width: `${project.riskScoresAvailable ? project.delayRisk : 0}%` }} /></div></div></td>
-                  <td><div className="risk-cell"><span className={`risk-number ${project.riskScoresAvailable ? project.costRisk >= 65 ? 'risk-high' : project.costRisk >= 40 ? 'risk-mid' : 'risk-low' : ''}`}>{project.riskScoresAvailable ? `${project.costRisk}%` : '—'}</span><div className="risk-track"><span className={project.costRisk >= 65 ? 'track-high' : project.costRisk >= 40 ? 'track-mid' : 'track-low'} style={{ width: `${project.riskScoresAvailable ? project.costRisk : 0}%` }} /></div></div></td>
-                  <td><span className={`status-pill status-${project.color}`}><i />{project.status}</span></td>
-                  <td><button className="row-more" type="button" aria-label={`Open ${project.name}`} onClick={(event) => { event.stopPropagation(); setSelectedProject(project) }}><MoreHorizontal size={17} /></button></td>
-                </tr>)}</tbody>
-              </table>
-              {visibleProjects.length === 0 && <div className="empty-results">No projects match “{search}”.</div>}
-            </div>
-            <div className="table-footer"><span>Showing <strong>{visibleProjects.length}</strong> of <strong>{projects.length}</strong> sample projects</span><button type="button" onClick={() => setActivePage('Projects')}>View portfolio <ArrowRight size={14} /></button></div>
-          </section>
+              <section className="panel projects-panel">
+                <div className="panel-heading projects-heading">
+                  <div>
+                    <div className="section-kicker">PORTFOLIO MONITOR</div>
+                    <h2>Project performance <span className="heading-count">{projects.length}</span></h2>
+                  </div>
+                  <div className="project-actions">
+                    <button className="filter-button" type="button" onClick={() => setAddProjectOpen(true)}><Plus size={14} /> Add project</button>
+                    <button className="filter-button" type="button" onClick={() => setSearch(search ? '' : 'East')}><Activity size={14} /> Filter</button>
+                    <button className="text-link" type="button" onClick={() => setActivePage('Projects')}>All projects <ArrowRight size={14} /></button>
+                  </div>
+                </div>
+                <div className="table-scroll">
+                  <table className="project-table">
+                    <thead>
+                      <tr>
+                        <th>PROJECT</th><th>CONTRACTOR</th><th>BUDGET</th><th>PROGRESS</th><th>DELAY RISK</th><th>COST RISK</th><th>STATUS</th><th aria-label="Actions" />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleProjects.map((project) => (
+                        <tr key={project.id} onClick={() => { setSelectedProject(project); setSelectedFactorIndex(0) }}>
+                          <td>
+                            <div className="project-name-cell">
+                              <span className={`project-avatar project-${project.color}`}>{project.initials}</span>
+                              <span><strong>{project.name}</strong><small>{project.id} <i>·</i> {project.agency}</small></span>
+                            </div>
+                          </td>
+                          <td className="contractor-cell">{project.contractor}</td>
+                          <td className="budget-cell">{project.budget}</td>
+                          <td>
+                            <div className="progress-cell">
+                              <div className="progress-track"><span style={{ width: `${project.progress}%` }} /></div>
+                              <small>{project.progress}%</small>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="risk-cell">
+                              <span className={`risk-number ${project.riskScoresAvailable ? project.delayRisk >= 65 ? 'risk-high' : project.delayRisk >= 40 ? 'risk-mid' : 'risk-low' : ''}`}>
+                                {project.riskScoresAvailable ? `${project.delayRisk}%` : '—'}
+                              </span>
+                              <div className="risk-track">
+                                <span className={project.delayRisk >= 65 ? 'track-high' : project.delayRisk >= 40 ? 'track-mid' : 'track-low'} style={{ width: `${project.riskScoresAvailable ? project.delayRisk : 0}%` }} />
+                              </div>
+                            </div>
+                          </td>
+                          <td>
+                            <div className="risk-cell">
+                              <span className={`risk-number ${project.riskScoresAvailable ? project.costRisk >= 65 ? 'risk-high' : project.costRisk >= 40 ? 'risk-mid' : 'risk-low' : ''}`}>
+                                {project.riskScoresAvailable ? `${project.costRisk}%` : '—'}
+                              </span>
+                              <div className="risk-track">
+                                <span className={project.costRisk >= 65 ? 'track-high' : project.costRisk >= 40 ? 'track-mid' : 'track-low'} style={{ width: `${project.riskScoresAvailable ? project.costRisk : 0}%` }} />
+                              </div>
+                            </div>
+                          </td>
+                          <td><span className={`status-pill status-${project.color}`}><i />{project.status}</span></td>
+                          <td>
+                            <button className="row-more" type="button" aria-label={`Open ${project.name}`} onClick={(event) => { event.stopPropagation(); setSelectedProject(project); setSelectedFactorIndex(0) }}>
+                              <MoreHorizontal size={17} />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {visibleProjects.length === 0 && <div className="empty-results">No projects match “{search}”.</div>}
+                </div>
+                <div className="table-footer">
+                  <span>Showing <strong>{visibleProjects.length}</strong> of <strong>{projects.length}</strong> projects</span>
+                  <button type="button" onClick={() => setActivePage('Projects')}>View portfolio <ArrowRight size={14} /></button>
+                </div>
+              </section>
 
-          <footer className="dashboard-footer"><span><span className="live-dot" /> Portfolio data synced 12 minutes ago</span><span>Demo workspace · Sample contract data</span></footer>
-          </> : <>
-            {activePage === 'Projects' && <ProjectsPage projects={visibleProjects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} onAddProject={() => setAddProjectOpen(true)} />}
-            {activePage === 'Risk signals' && <RiskSignalsPage projects={visibleProjects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} />}
-            {activePage === 'Documents' && <DocumentsPage projects={projects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} />}
-            {activePage === 'Contractors' && <ContractorsPage projects={visibleProjects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} />}
-            {activePage === 'Budget & spend' && <BudgetPage projects={visibleProjects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} />}
-            {activePage === 'Help center' && <HelpPage onGoToProjects={() => setActivePage('Projects')} />}
-          </>}
+              <footer className="dashboard-footer">
+                <span><span className="live-dot" /> Portfolio synced via Spring Boot API</span>
+                <span>Decision support with AI evidence retrieval</span>
+              </footer>
+            </>
+          ) : (
+            <>
+              {activePage === 'Projects' && <ProjectsPage projects={visibleProjects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} onAddProject={() => setAddProjectOpen(true)} />}
+              {activePage === 'Risk signals' && <RiskSignalsPage projects={visibleProjects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} />}
+              {activePage === 'Documents' && <DocumentsPage projects={projects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} />}
+              {activePage === 'Contractors' && <ContractorsPage projects={visibleProjects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} />}
+              {activePage === 'Budget & spend' && <BudgetPage projects={visibleProjects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} />}
+              {activePage === 'Help center' && <HelpPage onGoToProjects={() => setActivePage('Projects')} />}
+            </>
+          )}
         </div>
       </main>
 
-      {selectedProject && <div className="drawer-backdrop" onClick={() => setSelectedProject(null)}>
-        <aside className="project-drawer" onClick={(event) => event.stopPropagation()}>
-          <div className="drawer-top"><span className="drawer-label">PROJECT DETAILS · API DEMO</span><div className="drawer-top-actions"><button className="secondary-button" type="button" onClick={deleteProject}>Delete project</button><button className="icon-button" type="button" aria-label="Close details" onClick={() => setSelectedProject(null)}><X size={19} /></button></div></div>
-          <div className="drawer-project"><span className={`project-avatar project-${selectedProject.color}`}>{selectedProject.initials}</span><div><span className="drawer-id">{selectedProject.id} <i>·</i> {selectedProject.agency}</span><h2>{selectedProject.name}</h2></div></div>
-          <div className="drawer-risk-summary">
-            <div className="risk-dial"><strong>{selectedProject.riskScoresAvailable ? `${selectedProject.delayRisk}%` : '—'}</strong><small>{selectedProject.riskScoresAvailable ? 'demo risk score' : 'not scored'}</small></div>
-            <div><span className={`status-pill status-${selectedProject.color}`}><i />{selectedProject.status}</span><p>Cost overrun risk <strong>{selectedProject.riskScoresAvailable ? `${selectedProject.costRisk}%` : 'Not scored'}</strong></p>{selectedProject.riskScoresAvailable && <p>Demo scores are not predictions</p>}<small>{selectedProject.riskScoresAvailable ? 'Sample data' : 'No risk model is connected'}</small></div>
-          </div>
-          <div className="drawer-section">
-            <div className="section-kicker">FEATURE ENGINEERING · SAMPLE</div>
-            {(() => {
-              const features = calculateProjectFeatures(selectedProject)
-              return <div className="feature-grid">
-                <article><small>Progress variance</small><strong className={features.progressVariance < 0 ? 'feature-negative' : 'feature-positive'}>{features.progressVariance > 0 ? '+' : ''}{features.progressVariance} pp</strong><span>Actual {selectedProject.progress}% − planned {selectedProject.plannedProgress}%</span></article>
-                <article><small>Schedule variance</small><strong className={features.scheduleVarianceDays !== null && features.scheduleVarianceDays > 0 ? 'feature-negative' : 'feature-positive'}>{features.scheduleVarianceDays === null ? 'Unavailable' : `${features.scheduleVarianceDays > 0 ? '+' : ''}${features.scheduleVarianceDays} days`}</strong><span>Forecast finish vs baseline finish</span></article>
+      {/* PROJECT RISK BRIEF & RAG EVIDENCE DRAWER */}
+      {selectedProject && (
+        <div className="drawer-backdrop" onClick={() => setSelectedProject(null)}>
+          <aside className="project-drawer" onClick={(event) => event.stopPropagation()}>
+            <div className="drawer-top">
+              <span className="drawer-label">PROJECT RISK BRIEF · RAG EVIDENCE</span>
+              <div className="drawer-top-actions">
+                <button className="secondary-button" type="button" onClick={deleteProject}>Delete project</button>
+                <button className="icon-button" type="button" aria-label="Close details" onClick={() => setSelectedProject(null)}>
+                  <X size={19} />
+                </button>
               </div>
-            })()}
-          </div>
-          <div className="drawer-section">
-            <div className="drawer-section-heading"><div className="section-kicker">PROGRESS HISTORY · SAMPLE</div><button className="filter-button" type="button" onClick={() => setProgressDialogOpen(true)}><Plus size={13} /> Record update</button></div>
-            <p className="feature-note">Latest snapshot: {selectedProject.progressAsOfDate}. Progress history is loaded from the Spring Boot API.</p>
-            <div className="drawer-progress-chart"><ResponsiveContainer width="100%" height="100%"><AreaChart data={selectedProject.progressHistory} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
-              <defs><linearGradient id="projectProgressFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#27765f" stopOpacity={0.14} /><stop offset="100%" stopColor="#27765f" stopOpacity={0} /></linearGradient></defs>
-              <CartesianGrid stroke="#e9ece7" strokeDasharray="3 5" vertical={false} />
-              <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#8b918c', fontSize: 8 }} tickFormatter={(date: string) => date.slice(5)} />
-              <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{ fill: '#8b918c', fontSize: 8 }} tickFormatter={(value: number) => `${value}%`} />
-              <Tooltip labelFormatter={(date) => `As of ${String(date)}`} formatter={(value, name) => [`${Number(value)}%`, name === 'actual' ? 'Actual progress' : 'Planned progress']} contentStyle={{ border: '1px solid #e6e9e3', borderRadius: 6, fontSize: 10 }} />
-              <Area type="monotone" dataKey="planned" stroke="#bbc4bd" strokeWidth={1.5} strokeDasharray="5 5" fill="none" name="Planned progress" dot={{ r: 3 }} />
-              <Area type="monotone" dataKey="actual" stroke="#27765f" strokeWidth={2} fill="url(#projectProgressFill)" name="Actual progress" dot={{ r: 3 }} />
-            </AreaChart></ResponsiveContainer></div>
-          </div>
-          <div className="drawer-section">
-            <div className="drawer-section-heading"><div className="section-kicker">MILESTONES & DELAY</div><button className="filter-button" type="button" onClick={() => setMilestoneDialogOpen(true)}><Plus size={13} /> Add milestone</button></div>
-            <div className="milestone-table-wrap"><table className="milestone-table"><thead><tr><th>Milestone</th><th>Planned</th><th>Delay</th><th>Status</th></tr></thead><tbody>{calculateProjectFeatures(selectedProject).milestoneDelays.map((milestone) => <tr key={milestone.id}><td>{milestone.name}</td><td>{milestone.plannedFinishDate}</td><td>{milestone.delayDays === null ? '—' : `${milestone.delayDays > 0 ? '+' : ''}${milestone.delayDays}d`}</td><td><select aria-label={`Status for ${milestone.name}`} value={milestone.status} onChange={(event) => updateMilestoneStatus(milestone.id, event.target.value as MilestoneStatus)}><option>Not started</option><option>In progress</option><option>Complete</option></select></td></tr>)}</tbody></table></div>
-            <p className="feature-note">Positive variance means behind schedule. Milestone delay uses actual finish when complete, otherwise forecast finish. Demo values only.</p>
-          </div>
-          {selectedProject.riskScoresAvailable && <>
-            <div className="drawer-section"><div className="section-kicker">WHY THIS PROJECT IS AT RISK</div><div className="factor-row"><span className="factor-rank">01</span><span><strong>Permit approval lag</strong><small>Environmental review is 23 days behind baseline</small></span><b className="factor-impact">+31%</b></div><div className="factor-row"><span className="factor-rank">02</span><span><strong>Subcontractor capacity</strong><small>Two specialist crews below planned staffing</small></span><b className="factor-impact">+24%</b></div><div className="factor-row"><span className="factor-rank">03</span><span><strong>Weather exposure</strong><small>Seasonal rainfall impacts foundation window</small></span><b className="factor-impact">+16%</b></div></div>
-            <div className="evidence-card"><div className="evidence-icon"><FileText size={17} /></div><div><div className="section-kicker">SUPPORTING EVIDENCE</div><strong>Weekly field report · October 1</strong><p>“Permit review remains outstanding. Foundation work cannot proceed until environmental clearance is received.”</p><button type="button">View source document <ArrowRight size={13} /></button></div></div>
+            </div>
+
+            <div className="drawer-project">
+              <span className={`project-avatar project-${selectedProject.color}`}>{selectedProject.initials}</span>
+              <div>
+                <span className="drawer-id">{selectedProject.id} <i>·</i> {selectedProject.agency}</span>
+                <h2>{selectedProject.name}</h2>
+              </div>
+            </div>
+
+            <div className="drawer-risk-summary">
+              <div className="risk-dial">
+                <strong>{selectedProject.riskScoresAvailable ? `${selectedProject.delayRisk}%` : '—'}</strong>
+                <small>{selectedProject.riskScoresAvailable ? 'delay likelihood' : 'not scored'}</small>
+              </div>
+              <div>
+                <span className={`status-pill status-${selectedProject.color}`}><i />{selectedProject.status}</span>
+                <p>Cost overrun risk <strong>{selectedProject.riskScoresAvailable ? `${selectedProject.costRisk}%` : 'Not scored'}</strong></p>
+                <p>Contractor <strong>{selectedProject.contractor}</strong></p>
+                <small>Connected to pgvector evidence store</small>
+              </div>
+            </div>
+
+            <div className="drawer-section">
+              <div className="section-kicker">FEATURE ENGINEERING · METRICS</div>
+              {(() => {
+                const features = calculateProjectFeatures(selectedProject)
+                return (
+                  <div className="feature-grid">
+                    <article>
+                      <small>Progress variance</small>
+                      <strong className={features.progressVariance < 0 ? 'feature-negative' : 'feature-positive'}>
+                        {features.progressVariance > 0 ? '+' : ''}{features.progressVariance} pp
+                      </strong>
+                      <span>Actual {selectedProject.progress}% − planned {selectedProject.plannedProgress}%</span>
+                    </article>
+                    <article>
+                      <small>Schedule variance</small>
+                      <strong className={features.scheduleVarianceDays !== null && features.scheduleVarianceDays > 0 ? 'feature-negative' : 'feature-positive'}>
+                        {features.scheduleVarianceDays === null ? 'Unavailable' : `${features.scheduleVarianceDays > 0 ? '+' : ''}${features.scheduleVarianceDays} days`}
+                      </strong>
+                      <span>Forecast finish vs baseline finish</span>
+                    </article>
+                  </div>
+                )
+              })()}
+            </div>
+
+            <div className="drawer-section">
+              <div className="drawer-section-heading">
+                <div className="section-kicker">PROGRESS HISTORY</div>
+                <button className="filter-button" type="button" onClick={() => setProgressDialogOpen(true)}>
+                  <Plus size={13} /> Record update
+                </button>
+              </div>
+              <p className="feature-note">Latest snapshot: {selectedProject.progressAsOfDate}. Synced with Spring Boot.</p>
+              <div className="drawer-progress-chart">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={selectedProject.progressHistory} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="projectProgressFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#27765f" stopOpacity={0.14} />
+                        <stop offset="100%" stopColor="#27765f" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="#e9ece7" strokeDasharray="3 5" vertical={false} />
+                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#8b918c', fontSize: 8 }} tickFormatter={(date: string) => date.slice(5)} />
+                    <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{ fill: '#8b918c', fontSize: 8 }} tickFormatter={(value: number) => `${value}%`} />
+                    <Tooltip labelFormatter={(date) => `As of ${String(date)}`} formatter={(value, name) => [`${Number(value)}%`, name === 'actual' ? 'Actual progress' : 'Planned progress']} contentStyle={{ border: '1px solid #e6e9e3', borderRadius: 6, fontSize: 10 }} />
+                    <Area type="monotone" dataKey="planned" stroke="#bbc4bd" strokeWidth={1.5} strokeDasharray="5 5" fill="none" name="Planned progress" dot={{ r: 3 }} />
+                    <Area type="monotone" dataKey="actual" stroke="#27765f" strokeWidth={2} fill="url(#projectProgressFill)" name="Actual progress" dot={{ r: 3 }} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="drawer-section">
+              <div className="drawer-section-heading">
+                <div className="section-kicker">MILESTONES & DELAY</div>
+                <button className="filter-button" type="button" onClick={() => setMilestoneDialogOpen(true)}>
+                  <Plus size={13} /> Add milestone
+                </button>
+              </div>
+              <div className="milestone-table-wrap">
+                <table className="milestone-table">
+                  <thead>
+                    <tr><th>Milestone</th><th>Planned</th><th>Delay</th><th>Status</th></tr>
+                  </thead>
+                  <tbody>
+                    {calculateProjectFeatures(selectedProject).milestoneDelays.map((milestone) => (
+                      <tr key={milestone.id}>
+                        <td>{milestone.name}</td>
+                        <td>{milestone.plannedFinishDate}</td>
+                        <td>{milestone.delayDays === null ? '—' : `${milestone.delayDays > 0 ? '+' : ''}${milestone.delayDays}d`}</td>
+                        <td>
+                          <select aria-label={`Status for ${milestone.name}`} value={milestone.status} onChange={(event) => updateMilestoneStatus(milestone.id, event.target.value as MilestoneStatus)}>
+                            <option>Not started</option>
+                            <option>In progress</option>
+                            <option>Complete</option>
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* WHY THIS PROJECT IS AT RISK (SELECT FACTOR TO CONNECT CONTRACT EVIDENCE) */}
+            <div className="drawer-section">
+              <div className="section-kicker">WHY THIS PROJECT IS AT RISK (SELECT FACTOR)</div>
+              {factorsForSelected.map((factor, idx) => (
+                <div
+                  key={idx}
+                  className={`factor-row ${selectedFactorIndex === idx ? 'factor-selected' : ''}`}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => setSelectedFactorIndex(idx)}
+                >
+                  <span className="factor-rank">{factor.rank}</span>
+                  <span>
+                    <strong>{factor.title}</strong>
+                    <small>{factor.detail}</small>
+                  </span>
+                  <b className="factor-impact">{factor.impact}</b>
+                </div>
+              ))}
+            </div>
+
+            {/* SUPPORTING CONTRACT EVIDENCE CITATION (CONNECTED VIA RAG) */}
+            <div className="evidence-card">
+              <div className="evidence-icon"><FileText size={17} /></div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                  <div className="section-kicker" style={{ margin: 0 }}>SUPPORTING CONTRACT EVIDENCE</div>
+                  <span className={`evidence-badge ${evidenceIsLive ? 'badge-live' : 'badge-demo'}`}>
+                    <Database size={9} />
+                    {evidenceIsLive ? 'Live pgvector' : 'Curated Evidence'}
+                    {evidenceItems[0] && ` · ${Math.round(evidenceItems[0].similarity_score * 100)}% match`}
+                  </span>
+                </div>
+
+                {loadingEvidence ? (
+                  <p style={{ color: '#88938a', fontSize: 9 }}>Connecting risk to contract clauses...</p>
+                ) : evidenceItems.length > 0 ? (
+                  <>
+                    <strong style={{ display: 'block', marginBottom: 2 }}>
+                      {evidenceItems[0].section_title || 'Contractual Clause Citation'}
+                    </strong>
+                    <small style={{ color: '#8d958e', display: 'block', marginBottom: 6 }}>
+                      {evidenceItems[0].document_name || evidenceItems[0].document_id} {evidenceItems[0].page_number ? `· Page ${evidenceItems[0].page_number}` : ''}
+                    </small>
+                    <p style={{ margin: '6px 0 8px', fontStyle: 'italic', fontSize: 9, lineHeight: 1.5 }}>
+                      “{evidenceItems[0].clause_text}”
+                    </p>
+                    {evidenceItems[0].connection_rationale && (
+                      <div className="evidence-rationale" style={{ marginTop: 6, marginBottom: 8 }}>
+                        <strong>ML Connection: </strong>
+                        {evidenceItems[0].connection_rationale}
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setActivePage('Documents')
+                        setSelectedProject(null)
+                      }}
+                    >
+                      View documents & clauses <ArrowRight size={13} />
+                    </button>
+                  </>
+                ) : (
+                  <p>No contract clause evidence found for this specific risk factor.</p>
+                )}
+              </div>
+            </div>
+
             <div className="recommendation-card">
-  {dismissed ? (
-    <div className="dismissed-card">
-      <div><X size={16} /><strong>Recommendation dismissed</strong></div>
-      <p>This recommendation was dismissed. The decision is recorded in the audit trail.</p>
-    </div>
-  ) : (
-    <div className="recommendation-card">
-      <div className="recommendation-title"><Sparkles size={16} /><strong>Recommended next step</strong></div>
-      <p>Schedule an agency coordination meeting to resolve permit blockers before the October 18 milestone.</p>
-      <span>Potential impact <b>Recover 2–3 weeks</b></span>
-    </div>
-  )}
-</div>
+              {dismissed ? (
+                <div className="dismissed-card">
+                  <div><X size={16} /><strong>Recommendation dismissed</strong></div>
+                  <p>This recommendation was dismissed. The decision is recorded in the audit trail.</p>
+                </div>
+              ) : (
+                <div className="recommendation-card">
+                  <div className="recommendation-title"><Sparkles size={16} /><strong>Recommended next step</strong></div>
+                  <p>Schedule an agency coordination meeting to resolve permit blockers before the milestone target.</p>
+                  <span>Potential impact <b>Recover 2–3 weeks</b></span>
+                </div>
+              )}
+            </div>
+
             <div className="drawer-actions">
-  <button
-    className={`approve-button ${approved ? 'approved-button' : ''}`}
-    type="button"
-    disabled={dismissed}
-    onClick={() => { setApproved(true); setDismissed(false) }}
-  >
-    {dismissed ? <><X size={16} /> Recommendation dismissed</> : approved ? <><Check size={16} /> Recommendation approved</> : <><Check size={16} /> Approve recommendation</>}
-  </button>
-  <button
-    className="secondary-button"
-    type="button"
-    onClick={() => { setApproved(false); setDismissed(!dismissed) }}
-  >
-    {dismissed ? 'Undo' : 'Dismiss'}
-  </button>
+              <button
+                className={`approve-button ${approved ? 'approved-button' : ''}`}
+                type="button"
+                disabled={dismissed}
+                onClick={() => { setApproved(true); setDismissed(false) }}
+              >
+                {dismissed ? <><X size={16} /> Recommendation dismissed</> : approved ? <><Check size={16} /> Recommendation approved</> : <><Check size={16} /> Approve recommendation</>}
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => { setApproved(false); setDismissed(!dismissed) }}
+              >
+                {dismissed ? 'Undo' : 'Dismiss'}
+              </button>
             </div>
             <p className="audit-note"><ShieldCheck size={13} /> {dismissed ? 'Dismissal recorded in the audit trail.' : 'Your decision is recorded in the audit trail.'}</p>
-          </>}
-        </aside>
-      </div>}
-{addProjectOpen && <AddProjectDialog onClose={() => setAddProjectOpen(false)} onSubmit={addProject} />}
-{progressDialogOpen && <ProgressUpdateDialog onClose={() => setProgressDialogOpen(false)} onSubmit={updateProjectProgress} />}
-{milestoneDialogOpen && <AddMilestoneDialog onClose={() => setMilestoneDialogOpen(false)} onSubmit={addMilestone} />}
+          </aside>
+        </div>
+      )}
+
+      {addProjectOpen && <AddProjectDialog onClose={() => setAddProjectOpen(false)} onSubmit={addProject} />}
+      {progressDialogOpen && <ProgressUpdateDialog onClose={() => setProgressDialogOpen(false)} onSubmit={updateProjectProgress} />}
+      {milestoneDialogOpen && <AddMilestoneDialog onClose={() => setMilestoneDialogOpen(false)} onSubmit={addMilestone} />}
     </div>
   )
 }

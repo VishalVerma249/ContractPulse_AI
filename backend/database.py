@@ -17,9 +17,13 @@ class ContractClause(Base):
     __tablename__ = "contract_clauses"
     
     id = Column(Integer, primary_key=True, index=True)
+    project_id = Column(String, index=True, nullable=True)
     document_id = Column(String, index=True)
+    document_name = Column(String, nullable=True)
+    section_title = Column(String, nullable=True)
     clause_text = Column(Text)
-    # Using 1536 dimensions for OpenAI embeddings
+    page_number = Column(Integer, nullable=True)
+    # Using 1536 dimensions for embeddings
     embedding = Column(Vector(1536))
     
 def init_db():
