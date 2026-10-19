@@ -1,28 +1,50 @@
-// src/api.ts
-// Handles API calls to the ContractPulse AI ML & Evidence backend
+import type { MilestoneStatus, Project, ProgressSnapshot } from './projectFeatures'
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080/api'
+
+export type ProjectPayload = {
+  name: string
+  agency: string
+  contractor: string
+  budget: string
+  progress: number
+  plannedProgress: number
+  baselineFinishDate: string
+  forecastFinishDate: string
+  milestone: string
+  milestoneDueDate: string
+}
+
+export type ProgressPayload = ProgressSnapshot
+
+export type MilestonePayload = {
+  name: string
+  plannedFinishDate: string
+  forecastFinishDate: string | null
+  actualFinishDate: string | null
+  status: MilestoneStatus
+}
 
 export interface RiskPredictionPayload {
-  project_id: string;
-  risk_type: string;
-  risk_description: string;
-  risk_score: number;
-  factor_title?: string;
+  project_id: string
+  risk_type: string
+  risk_description: string
+  risk_score: number
+  factor_title?: string
 }
 
 export interface EvidenceItem {
-  clause_id: number;
-  project_id?: string;
-  document_id: string;
-  document_name?: string;
-  section_title?: string;
-  clause_text: string;
-  page_number?: number;
-  similarity_score: number;
-  connection_rationale: string;
+  clause_id: number
+  project_id?: string
+  document_id: string
+  document_name?: string
+  section_title?: string
+  clause_text: string
+  page_number?: number
+  similarity_score: number
+  connection_rationale: string
 }
 
-
-// Fallback mock evidence used if backend server is not running
 export const FALLBACK_EVIDENCE: Record<string, EvidenceItem[]> = {
   'CP-2048': [
     {
@@ -109,26 +131,97 @@ export const FALLBACK_EVIDENCE: Record<string, EvidenceItem[]> = {
       connection_rationale: 'The model flagged a 47% budget burn risk. Section 15.3 establishes expenditure audit triggers.',
     },
   ],
-};
+}
 
-const API_PORTS = [8080, 8000];
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      ...(init?.body ? { 'Content-Type': 'application/json' } : {}),
+      ...init?.headers,
+    },
+  })
 
-async function fetchFromBackend(endpoint: string, options: RequestInit): Promise<Response | null> {
-  for (const port of API_PORTS) {
-    try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 2000);
-      const res = await fetch(`http://localhost:${port}${endpoint}`, {
-        ...options,
-        signal: controller.signal,
-      });
-      clearTimeout(timeoutId);
-      if (res.ok) return res;
-    } catch {
-      // try next port
-    }
+  if (!response.ok) {
+    const body = await response.json().catch(() => null) as { message?: string } | null
+    throw new Error(body?.message ?? `Request failed (${response.status})`)
   }
-  return null;
+
+  if (response.status === 204) return undefined as T
+  return response.json() as Promise<T>
+}
+
+export function getProjects() {
+  return request<Project[]>('/projects')
+}
+
+export function createProject(payload: ProjectPayload) {
+  return request<Project>('/projects', { method: 'POST', body: JSON.stringify(toApiProject(payload)) })
+}
+
+export function updateProject(id: string, payload: ProjectPayload) {
+  return request<Project>(`/projects/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(toApiProject(payload)) })
+}
+
+export function deleteProject(id: string) {
+  return request<void>(`/projects/${encodeURIComponent(id)}`, { method: 'DELETE' })
+}
+
+export function createProgressSnapshot(projectId: string, payload: ProgressPayload) {
+  return request<Project>(`/projects/${encodeURIComponent(projectId)}/progress`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateProgressSnapshot(projectId: string, snapshotId: string, payload: ProgressPayload) {
+  return request<Project>(`/projects/${encodeURIComponent(projectId)}/progress/${encodeURIComponent(snapshotId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteProgressSnapshot(projectId: string, snapshotId: string) {
+  return request<Project>(`/projects/${encodeURIComponent(projectId)}/progress/${encodeURIComponent(snapshotId)}`, {
+    method: 'DELETE',
+  })
+}
+
+export function createMilestone(projectId: string, payload: MilestonePayload) {
+  return request<Project>(`/projects/${encodeURIComponent(projectId)}/milestones`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function updateMilestone(projectId: string, milestoneId: string, payload: MilestonePayload) {
+  return request<Project>(`/projects/${encodeURIComponent(projectId)}/milestones/${encodeURIComponent(milestoneId)}`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteMilestone(projectId: string, milestoneId: string) {
+  return request<Project>(`/projects/${encodeURIComponent(projectId)}/milestones/${encodeURIComponent(milestoneId)}`, {
+    method: 'DELETE',
+  })
+}
+
+function toApiProject(payload: ProjectPayload) {
+  const budgetCrores = Number(payload.budget.replace(/[^\d.]/g, ''))
+  if (!Number.isFinite(budgetCrores)) throw new Error('Budget must be a valid number')
+  return {
+    name: payload.name,
+    agency: payload.agency,
+    contractor: payload.contractor,
+    budgetCrores,
+    progress: payload.progress,
+    plannedProgress: payload.plannedProgress,
+    baselineFinishDate: payload.baselineFinishDate,
+    forecastFinishDate: payload.forecastFinishDate,
+    milestoneName: payload.milestone,
+    milestoneDueDate: payload.milestoneDueDate,
+  }
 }
 
 /**
@@ -139,62 +232,70 @@ export async function connectRiskToEvidence(
   risk: RiskPredictionPayload
 ): Promise<{ evidence: EvidenceItem[]; isLive: boolean }> {
   try {
-    const response = await fetchFromBackend('/api/ml/connect-evidence', {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 2500)
+
+    const response = await fetch(`${API_BASE_URL}/ml/connect-evidence`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(risk),
-    });
+      signal: controller.signal,
+    })
+    clearTimeout(timeoutId)
 
-    if (response && response.ok) {
-      const data = await response.json();
+    if (response.ok) {
+      const data = await response.json()
       if (Array.isArray(data) && data.length > 0) {
-        return { evidence: data, isLive: true };
+        return { evidence: data, isLive: true }
       }
     }
   } catch {
     // Backend offline or timeout -> gracefully fall back
   }
 
-  // Graceful fallback
-  const fallback = FALLBACK_EVIDENCE[risk.project_id] || FALLBACK_EVIDENCE['CP-2048'];
-  return { evidence: fallback, isLive: false };
+  const fallback = FALLBACK_EVIDENCE[risk.project_id] || FALLBACK_EVIDENCE['CP-2048']
+  return { evidence: fallback, isLive: false }
 }
 
 /**
- * Searches indexed clauses across contracts.
+ * Searches indexed clauses across contracts via pgvector.
  */
 export async function searchContractClauses(
   query: string,
   projectId?: string
 ): Promise<{ evidence: EvidenceItem[]; isLive: boolean }> {
   try {
-    const params = new URLSearchParams();
-    if (query) params.append('q', query);
-    if (projectId) params.append('project_id', projectId);
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 2500)
 
-    const endpoint = `/api/documents/clauses?${params.toString()}`;
-    const response = await fetchFromBackend(endpoint, { method: 'GET' });
+    const params = new URLSearchParams()
+    if (query) params.append('q', query)
+    if (projectId && projectId !== 'ALL') params.append('project_id', projectId)
 
-    if (response && response.ok) {
-      const data = await response.json();
-      return { evidence: data, isLive: true };
+    const response = await fetch(`${API_BASE_URL}/documents/clauses?${params.toString()}`, {
+      method: 'GET',
+      signal: controller.signal,
+    })
+    clearTimeout(timeoutId)
+
+    if (response.ok) {
+      const data = await response.json()
+      return { evidence: data, isLive: true }
     }
   } catch {
     // Backend offline
   }
 
-  // Search through all fallback items
-  const allFallback = Object.values(FALLBACK_EVIDENCE).flat();
+  const allFallback = Object.values(FALLBACK_EVIDENCE).flat()
   const filtered = allFallback.filter((item) => {
-    const matchProject = !projectId || item.project_id === projectId;
+    const matchProject = !projectId || projectId === 'ALL' || item.project_id === projectId
     const matchQuery =
       !query ||
       `${item.document_name} ${item.section_title} ${item.clause_text}`
         .toLowerCase()
-        .includes(query.toLowerCase());
-    return matchProject && matchQuery;
-  });
+        .includes(query.toLowerCase())
+    return matchProject && matchQuery
+  })
 
-  return { evidence: filtered, isLive: false };
+  return { evidence: filtered, isLive: false }
 }
-

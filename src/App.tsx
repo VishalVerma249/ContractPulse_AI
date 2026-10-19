@@ -1,9 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   Activity,
-  ArrowDownRight,
   ArrowRight,
-  ArrowUpRight,
   Bell,
   BriefcaseBusiness,
   Check,
@@ -16,11 +14,11 @@ import {
   LayoutDashboard,
   Menu,
   MoreHorizontal,
+  Plus,
   RefreshCw,
   Search,
   ShieldCheck,
   Sparkles,
-  UploadCloud,
   UsersRound,
   Wallet,
   X,
@@ -34,84 +32,28 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import './App.css'
+import { calculateProjectFeatures, type MilestoneStatus, type Project } from './projectFeatures'
 import {
+  createMilestone as createMilestoneApi,
+  createProgressSnapshot,
+  createProject as createProjectApi,
+  deleteProject as deleteProjectApi,
+  getProjects,
+  updateMilestone as updateMilestoneApi,
   connectRiskToEvidence,
-  searchContractClauses,
   type EvidenceItem,
 } from './api'
+import {
+  BudgetPage,
+  ContractorsPage,
+  DocumentsPage,
+  HelpPage,
+  ProjectsPage,
+  RiskSignalsPage,
+} from './WorkspacePages'
+import './App.css'
 
-const projects = [
-  {
-    id: 'CP-2048',
-    name: 'East River Flood Barrier',
-    agency: 'New York City DOT',
-    contractor: 'Granite Construction',
-    budget: '$184.6M',
-    progress: 62,
-    delayRisk: 78,
-    costRisk: 64,
-    status: 'Action needed',
-    color: 'coral',
-    initials: 'ER',
-    milestone: 'Foundation completion',
-    due: 'Oct 18, 2026',
-  },
-  {
-    id: 'CP-1932',
-    name: 'I-405 Sound Wall Expansion',
-    agency: 'Washington State DOT',
-    contractor: 'Kiewit Infrastructure',
-    budget: '$92.3M',
-    progress: 44,
-    delayRisk: 56,
-    costRisk: 38,
-    status: 'Watch closely',
-    color: 'gold',
-    initials: 'I4',
-    milestone: 'North corridor paving',
-    due: 'Nov 02, 2026',
-  },
-  {
-    id: 'CP-1876',
-    name: 'Civic Center Modernization',
-    agency: 'City of San Francisco',
-    contractor: 'Turner Construction',
-    budget: '$67.8M',
-    progress: 81,
-    delayRisk: 22,
-    costRisk: 19,
-    status: 'On track',
-    color: 'green',
-    initials: 'CC',
-    milestone: 'Systems commissioning',
-    due: 'Oct 29, 2026',
-  },
-  {
-    id: 'CP-1764',
-    name: 'South County Water Main',
-    agency: 'King County Public Works',
-    contractor: 'Michels Corporation',
-    budget: '$38.1M',
-    progress: 36,
-    delayRisk: 34,
-    costRisk: 47,
-    status: 'Watch closely',
-    color: 'gold',
-    initials: 'SW',
-    milestone: 'Pressure testing',
-    due: 'Dec 11, 2026',
-  },
-]
-
-interface ProjectRiskFactor {
-  rank: string
-  title: string
-  detail: string
-  impact: string
-}
-
-const projectRiskFactors: Record<string, ProjectRiskFactor[]> = {
+const projectRiskFactors: Record<string, { rank: string; title: string; detail: string; impact: string }[]> = {
   'CP-2048': [
     { rank: '01', title: 'Permit approval lag', detail: 'Environmental review is 23 days behind baseline', impact: '+31%' },
     { rank: '02', title: 'Subcontractor capacity', detail: 'Two specialist marine piling crews below planned staffing', impact: '+24%' },
@@ -131,36 +73,135 @@ const projectRiskFactors: Record<string, ProjectRiskFactor[]> = {
   ],
 }
 
-const forecast = [
-  { month: 'Jan', baseline: 26, projected: 25 },
-  { month: 'Feb', baseline: 32, projected: 31 },
-  { month: 'Mar', baseline: 39, projected: 36 },
-  { month: 'Apr', baseline: 46, projected: 44 },
-  { month: 'May', baseline: 54, projected: 61 },
-  { month: 'Jun', baseline: 61, projected: 76 },
-  { month: 'Jul', baseline: 69, projected: 88 },
-]
-
-const uploadedContracts = [
-  { id: 'DOC-ERFB-001', name: 'East River Barrier - General Contract Agreement.pdf', project: 'CP-2048', projectName: 'East River Flood Barrier', date: 'Sep 28, 2026', size: '4.2 MB', clauses: 42, status: 'Indexed in pgvector' },
-  { id: 'DOC-ERFB-002', name: 'East River Barrier - Subcontractor Staffing Plan.pdf', project: 'CP-2048', projectName: 'East River Flood Barrier', date: 'Sep 30, 2026', size: '1.8 MB', clauses: 19, status: 'Indexed in pgvector' },
-  { id: 'DOC-I405-001', name: 'I-405 Sound Wall - Material Procurement Specifications.pdf', project: 'CP-1932', projectName: 'I-405 Sound Wall Expansion', date: 'Oct 02, 2026', size: '3.1 MB', clauses: 31, status: 'Indexed in pgvector' },
-  { id: 'DOC-CCM-001', name: 'Civic Center - Building Systems Technical Standards.pdf', project: 'CP-1876', projectName: 'Civic Center Modernization', date: 'Sep 15, 2026', size: '5.6 MB', clauses: 78, status: 'Indexed in pgvector' },
-  { id: 'DOC-SCWM-001', name: 'South County Water Main - Pipeline Engineering Specs.pdf', project: 'CP-1764', projectName: 'South County Water Main', date: 'Aug 20, 2026', size: '2.9 MB', clauses: 45, status: 'Indexed in pgvector' },
-]
-
 const navigation = [
   { label: 'Overview', icon: LayoutDashboard },
-  { label: 'Projects', icon: BriefcaseBusiness, count: '12' },
-  { label: 'Risk signals', icon: Activity, count: '6' },
+  { label: 'Projects', icon: BriefcaseBusiness, count: '4' },
+  { label: 'Risk signals', icon: Activity, count: '3' },
   { label: 'Documents', icon: FileSearch },
   { label: 'Contractors', icon: UsersRound },
   { label: 'Budget & spend', icon: Wallet },
 ]
 
-type Project = (typeof projects)[number]
+const currentDate = new Date().toISOString().slice(0, 10)
+
+type ProjectDraft = Pick<Project,
+  'name' | 'agency' | 'contractor' | 'budget' | 'progress' | 'plannedProgress' |
+  'baselineFinishDate' | 'forecastFinishDate' | 'milestone'
+> & {
+  milestoneDueDate: string
+}
+
+type ProgressDraft = {
+  date: string
+  planned: number
+  actual: number
+}
+
+type MilestoneDraft = {
+  name: string
+  plannedFinishDate: string
+  forecastFinishDate: string
+}
+
+function ProgressUpdateDialog({
+  onClose,
+  onSubmit,
+}: {
+  onClose: () => void
+  onSubmit: (snapshot: ProgressDraft) => void
+}) {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    onSubmit({
+      date: String(data.get('date')),
+      planned: Number(data.get('planned')),
+      actual: Number(data.get('actual')),
+    })
+  }
+
+  return <div className="dialog-backdrop" onClick={onClose}><section className="add-project-dialog" role="dialog" aria-modal="true" aria-labelledby="progress-dialog-title" onClick={(event) => event.stopPropagation()}>
+    <div className="add-project-heading"><div><span className="section-kicker">DEMO WORKSPACE</span><h2 id="progress-dialog-title">Record progress update</h2></div><button className="icon-button" type="button" aria-label="Close progress update form" onClick={onClose}><X size={19} /></button></div>
+    <p className="form-demo-note">Saves this progress snapshot to the Spring Boot demo API.</p>
+    <form className="add-project-form" onSubmit={handleSubmit}>
+      <label>As-of date<input name="date" type="date" max={currentDate} required /></label>
+      <div className="form-two-columns"><label>Planned progress (%)<input name="planned" type="number" min="0" max="100" step="1" required /></label><label>Actual progress (%)<input name="actual" type="number" min="0" max="100" step="1" required /></label></div>
+      <div className="form-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="approve-button" type="submit"><Plus size={15} /> Save update</button></div>
+    </form>
+  </section></div>
+}
+
+function AddMilestoneDialog({
+  onClose,
+  onSubmit,
+}: {
+  onClose: () => void
+  onSubmit: (milestone: MilestoneDraft) => void
+}) {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    onSubmit({
+      name: String(data.get('name')).trim(),
+      plannedFinishDate: String(data.get('plannedFinishDate')),
+      forecastFinishDate: String(data.get('forecastFinishDate')),
+    })
+  }
+
+  return <div className="dialog-backdrop" onClick={onClose}><section className="add-project-dialog" role="dialog" aria-modal="true" aria-labelledby="milestone-dialog-title" onClick={(event) => event.stopPropagation()}>
+    <div className="add-project-heading"><div><span className="section-kicker">DEMO WORKSPACE</span><h2 id="milestone-dialog-title">Add contract milestone</h2></div><button className="icon-button" type="button" aria-label="Close add milestone form" onClick={onClose}><X size={19} /></button></div>
+    <p className="form-demo-note">Adds a milestone to this project via the Spring Boot demo API.</p>
+    <form className="add-project-form" onSubmit={handleSubmit}>
+      <label>Milestone name<input name="name" required placeholder="e.g. Substructure inspection" /></label>
+      <div className="form-two-columns"><label>Planned finish date<input name="plannedFinishDate" type="date" required /></label><label>Forecast finish date<input name="forecastFinishDate" type="date" required /></label></div>
+      <div className="form-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="approve-button" type="submit"><Plus size={15} /> Add milestone</button></div>
+    </form>
+  </section></div>
+}
+
+function AddProjectDialog({
+  onClose,
+  onSubmit,
+}: {
+  onClose: () => void
+  onSubmit: (project: ProjectDraft) => void
+}) {
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const data = new FormData(event.currentTarget)
+    onSubmit({
+      name: String(data.get('name')).trim(),
+      agency: String(data.get('agency')).trim(),
+      contractor: String(data.get('contractor')).trim(),
+      budget: `₹${Number(data.get('budget')).toFixed(2)} Cr`,
+      progress: Number(data.get('progress')),
+      plannedProgress: Number(data.get('plannedProgress')),
+      baselineFinishDate: String(data.get('baselineFinishDate')),
+      forecastFinishDate: String(data.get('forecastFinishDate')),
+      milestone: String(data.get('milestone')).trim(),
+      milestoneDueDate: String(data.get('milestoneDueDate')),
+    })
+  }
+
+  return <div className="dialog-backdrop" onClick={onClose}><section className="add-project-dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title" onClick={(event) => event.stopPropagation()}>
+    <div className="add-project-heading"><div><span className="section-kicker">DEMO WORKSPACE</span><h2 id="dialog-title">Add project to portfolio</h2></div><button className="icon-button" type="button" aria-label="Close add project form" onClick={onClose}><X size={19} /></button></div>
+    <p className="form-demo-note">New records persist to the Spring Boot demo API while the server runs.</p>
+    <form className="add-project-form" onSubmit={handleSubmit}>
+      <label>Project name<input name="name" required placeholder="e.g. Metro Line 3 Pier Works" /></label>
+      <div className="form-two-columns"><label>Agency<input name="agency" required placeholder="e.g. Mumbai Metro Rail Corp" /></label><label>Contractor<input name="contractor" required placeholder="e.g. L&T Construction" /></label></div>
+      <div className="form-two-columns"><label>Budget (INR Crores)<input name="budget" type="number" step="0.01" min="1" required placeholder="125.50" /></label><label>Upcoming milestone<input name="milestone" required placeholder="Pier cap casting" /></label></div>
+      <div className="form-two-columns"><label>Current progress (%)<input name="progress" type="number" min="0" max="100" step="1" required defaultValue={0} /></label><label>Planned progress (%)<input name="plannedProgress" type="number" min="0" max="100" step="1" required defaultValue={0} /></label></div>
+      <div className="form-two-columns"><label>Baseline finish date<input name="baselineFinishDate" type="date" required /></label><label>Forecast finish date<input name="forecastFinishDate" type="date" required /></label></div>
+      <label>Milestone target date<input name="milestoneDueDate" type="date" required /></label>
+      <div className="form-actions"><button className="secondary-button" type="button" onClick={onClose}>Cancel</button><button className="approve-button" type="submit"><Plus size={15} /> Save project</button></div>
+    </form>
+  </section></div>
+}
 
 function App() {
+  const [projects, setProjects] = useState<Project[]>([])
+  const [isLoading, setIsLoading] = useState(true)
+  const [apiError, setApiError] = useState<string | null>(null)
   const [activePage, setActivePage] = useState('Overview')
   const [search, setSearch] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -171,28 +212,31 @@ function App() {
   const [approved, setApproved] = useState(false)
   const [dismissed, setDismissed] = useState(false)
   const [timeframe, setTimeframe] = useState('6 months')
+  const [addProjectOpen, setAddProjectOpen] = useState(false)
+  const [progressDialogOpen, setProgressDialogOpen] = useState(false)
+  const [milestoneDialogOpen, setMilestoneDialogOpen] = useState(false)
 
   // ML Evidence state
   const [evidenceItems, setEvidenceItems] = useState<EvidenceItem[]>([])
   const [evidenceIsLive, setEvidenceIsLive] = useState(false)
   const [loadingEvidence, setLoadingEvidence] = useState(false)
 
-  // Document Intelligence page state
-  const [docTab, setDocTab] = useState<'search' | 'upload'>('search')
-  const [clauseSearchQuery, setClauseSearchQuery] = useState('')
-  const [clauseProjectFilter, setClauseProjectFilter] = useState<string>('ALL')
-  const [searchedClauses, setSearchedClauses] = useState<EvidenceItem[]>([])
-  const [searchingClauses, setSearchingClauses] = useState(false)
-  const [uploadNotice, setUploadNotice] = useState<string | null>(null)
+  useEffect(() => {
+    void loadProjects()
+  }, [])
 
-  const visibleProjects = useMemo(
-    () => projects.filter((project) =>
-      `${project.name} ${project.agency} ${project.contractor}`
-        .toLowerCase()
-        .includes(search.toLowerCase()),
-    ),
-    [search],
-  )
+  async function loadProjects() {
+    try {
+      setIsLoading(true)
+      const data = await getProjects()
+      setProjects(data)
+      setApiError(null)
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Unable to connect to Spring Boot API')
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   // Retrieve evidence when project or selected factor changes
   useEffect(() => {
@@ -208,7 +252,7 @@ function App() {
       project_id: selectedProject.id,
       risk_type: activeFactor.title,
       risk_description: activeFactor.detail,
-      risk_score: selectedProject.delayRisk,
+      risk_score: selectedProject.riskScoresAvailable ? selectedProject.delayRisk : 75,
       factor_title: activeFactor.title,
     }).then(({ evidence, isLive }) => {
       if (isMounted) {
@@ -223,31 +267,116 @@ function App() {
     }
   }, [selectedProject, selectedFactorIndex])
 
-  // Search clauses in Documents page
-  useEffect(() => {
-    let isMounted = true
-    setSearchingClauses(true)
-
-    const projId = clauseProjectFilter === 'ALL' ? undefined : clauseProjectFilter
-    searchContractClauses(clauseSearchQuery, projId).then(({ evidence }) => {
-      if (isMounted) {
-        setSearchedClauses(evidence)
-        setSearchingClauses(false)
-      }
-    })
-
-    return () => {
-      isMounted = false
+  async function addProject(projectDraft: ProjectDraft) {
+    try {
+      const created = await createProjectApi(projectDraft)
+      setProjects((current) => [...current, created])
+      setSelectedProject(created)
+      setAddProjectOpen(false)
+      setApiError(null)
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Failed to add project')
     }
-  }, [clauseSearchQuery, clauseProjectFilter, activePage])
-
-  const handleSimulatedUpload = () => {
-    setUploadNotice('Parsing contract into clauses and generating 1536-dim vector embeddings in pgvector...')
-    setTimeout(() => {
-      setUploadNotice('Success! Contract indexed. 28 clauses stored and ready for ML risk evidence retrieval.')
-      setTimeout(() => setUploadNotice(null), 5000)
-    }, 1800)
   }
+
+  async function updateProjectProgress(snapshot: ProgressDraft) {
+    if (!selectedProject) return
+    try {
+      const updated = await createProgressSnapshot(selectedProject.id, snapshot)
+      setProjects((current) => current.map((item) => item.id === updated.id ? updated : item))
+      setSelectedProject(updated)
+      setProgressDialogOpen(false)
+      setApiError(null)
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Failed to save progress update')
+    }
+  }
+
+  async function addMilestone(milestoneDraft: MilestoneDraft) {
+    if (!selectedProject) return
+    try {
+      const updated = await createMilestoneApi(selectedProject.id, {
+        name: milestoneDraft.name,
+        plannedFinishDate: milestoneDraft.plannedFinishDate,
+        forecastFinishDate: milestoneDraft.forecastFinishDate,
+        actualFinishDate: null,
+        status: 'Not started',
+      })
+      setProjects((current) => current.map((item) => item.id === updated.id ? updated : item))
+      setSelectedProject(updated)
+      setMilestoneDialogOpen(false)
+      setApiError(null)
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Failed to add milestone')
+    }
+  }
+
+  async function updateMilestoneStatus(milestoneId: string, status: MilestoneStatus) {
+    if (!selectedProject) return
+    const milestone = selectedProject.milestones.find((item) => item.id === milestoneId)
+    if (!milestone) return
+
+    try {
+      const updated = await updateMilestoneApi(selectedProject.id, milestoneId, {
+        name: milestone.name,
+        plannedFinishDate: milestone.plannedFinishDate,
+        forecastFinishDate: milestone.forecastFinishDate,
+        actualFinishDate: status === 'Complete' ? currentDate : null,
+        status,
+      })
+      setProjects((current) => current.map((item) => item.id === updated.id ? updated : item))
+      setSelectedProject(updated)
+      setApiError(null)
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Failed to update milestone status')
+    }
+  }
+
+  async function deleteProject() {
+    if (!selectedProject) return
+    try {
+      await deleteProjectApi(selectedProject.id)
+      setProjects((current) => current.filter((item) => item.id !== selectedProject.id))
+      setSelectedProject(null)
+      setApiError(null)
+    } catch (error) {
+      setApiError(error instanceof Error ? error.message : 'Failed to delete project')
+    }
+  }
+
+  const visibleProjects = useMemo(
+    () => projects.filter((project) =>
+      `${project.name} ${project.agency} ${project.contractor} ${project.id}`
+        .toLowerCase()
+        .includes(search.toLowerCase()),
+    ),
+    [projects, search],
+  )
+
+  const portfolioHistory = useMemo(() => {
+    const totalsByDate = new Map<string, { planned: number; actual: number; count: number }>()
+    for (const project of projects) {
+      for (const snapshot of project.progressHistory) {
+        const total = totalsByDate.get(snapshot.date) ?? { planned: 0, actual: 0, count: 0 }
+        total.planned += snapshot.planned
+        total.actual += snapshot.actual
+        total.count += 1
+        totalsByDate.set(snapshot.date, total)
+      }
+    }
+    return [...totalsByDate.entries()]
+      .sort(([dateA], [dateB]) => dateA.localeCompare(dateB))
+      .map(([date, total]) => ({
+        date,
+        planned: Math.round(total.planned / total.count),
+        actual: Math.round(total.actual / total.count),
+      }))
+  }, [projects])
+
+  const latestPortfolioSnapshot = portfolioHistory[portfolioHistory.length - 1]
+  const attentionCount = projects.filter((project) => project.riskScoresAvailable && project.delayRisk >= 65).length
+  const totalBudget = projects.reduce((sum, project) => sum + Number(project.budget.replace(/[₹\sCr,]/g, '')), 0)
+  const projectById = new Map(projects.map((project) => [project.id, project]))
 
   const factorsForSelected = selectedProject
     ? projectRiskFactors[selectedProject.id] || projectRiskFactors['CP-2048']
@@ -334,274 +463,78 @@ function App() {
         </header>
 
         <div className="dashboard-content">
+          {apiError && <div className="api-alert" role="alert"><strong>Backend notice:</strong> {apiError} <span>(Using resilient mock & demo mode)</span></div>}
+          {isLoading && <div className="api-alert"><RefreshCw size={14} className="spin" /> Connecting to backend service…</div>}
+
           <section className="page-intro">
             <div>
-              <div className="eyebrow"><span className="eyebrow-line" />FRIDAY, OCTOBER 02, 2026 <span className="eyebrow-divider">·</span> WEEK 40</div>
-              <h1>
-                {activePage === 'Overview' && 'Good morning, Jordan'}
-                {activePage === 'Projects' && 'Project Performance Portfolio'}
-                {activePage === 'Risk signals' && 'ML Risk Signals & Predictions'}
-                {activePage === 'Documents' && 'Document Intelligence & Evidence Retrieval'}
-                {activePage !== 'Overview' && activePage !== 'Projects' && activePage !== 'Risk signals' && activePage !== 'Documents' && activePage}
-              </h1>
+              <div className="eyebrow"><span className="eyebrow-line" />SPRING BOOT & PGVECTOR <span className="eyebrow-divider">·</span> RAG EVIDENCE</div>
+              <h1>{activePage === 'Overview' ? 'Portfolio overview' : activePage}</h1>
               <p className="intro-subtitle">
-                {activePage === 'Documents'
-                  ? 'Ingest contracts, search pgvector embeddings, and connect ML predicted risks to legal evidence.'
-                  : 'Here’s what’s moving across your infrastructure portfolio.'}
+                {activePage === 'Overview' && `${projects.length} infrastructure contracts monitored with ML risk-to-evidence connection.`}
+                {activePage === 'Projects' && 'Review contract status, progress variance, and delay risk across your portfolio.'}
+                {activePage === 'Risk signals' && 'Inspect ML-predicted risk flags and review corresponding contract clauses.'}
+                {activePage === 'Documents' && 'Browse contract agreements, field reports, and retrieve legal evidence.'}
+                {activePage === 'Contractors' && 'Compare delivery partners using portfolio performance indicators.'}
+                {activePage === 'Budget & spend' && 'Review contract commitments, cost overruns, and risk metrics.'}
+                {activePage === 'Help center' && 'Decision support guidance and evaluation walkthrough.'}
               </p>
             </div>
             <button className="date-button" type="button"><Clock3 size={15} /> Last 30 days <ChevronDown size={14} /></button>
           </section>
 
-          {/* DOCUMENTS & EVIDENCE RETRIEVAL PAGE */}
-          {activePage === 'Documents' && (
-            <div className="doc-intel-container">
-              <div className="tab-pills">
-                <button
-                  type="button"
-                  className={`tab-pill ${docTab === 'search' ? 'tab-active' : ''}`}
-                  onClick={() => setDocTab('search')}
-                >
-                  <Search size={12} style={{ marginRight: 5, verticalAlign: -1 }} />
-                  Evidence & Clause Search
-                </button>
-                <button
-                  type="button"
-                  className={`tab-pill ${docTab === 'upload' ? 'tab-active' : ''}`}
-                  onClick={() => setDocTab('upload')}
-                >
-                  <UploadCloud size={12} style={{ marginRight: 5, verticalAlign: -1 }} />
-                  Uploaded Contracts ({uploadedContracts.length})
-                </button>
-              </div>
-
-              {docTab === 'search' && (
-                <>
-                  <div className="doc-search-bar">
-                    <Search size={16} color="#69786d" />
-                    <input
-                      className="doc-search-input"
-                      placeholder="Semantic search contract evidence (e.g., 'environmental permit lag', 'staffing quota', 'pressure testing')..."
-                      value={clauseSearchQuery}
-                      onChange={(e) => setClauseSearchQuery(e.target.value)}
-                    />
-                    {clauseSearchQuery && (
-                      <button
-                        type="button"
-                        className="text-link"
-                        onClick={() => setClauseSearchQuery('')}
-                      >
-                        Clear
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="doc-filter-chips">
-                    <span style={{ fontSize: 9, fontWeight: 700, color: '#88938a' }}>FILTER PROJECT:</span>
-                    <button
-                      type="button"
-                      className={`chip-btn ${clauseProjectFilter === 'ALL' ? 'chip-active' : ''}`}
-                      onClick={() => setClauseProjectFilter('ALL')}
-                    >
-                      All Projects
-                    </button>
-                    {projects.map((p) => (
-                      <button
-                        key={p.id}
-                        type="button"
-                        className={`chip-btn ${clauseProjectFilter === p.id ? 'chip-active' : ''}`}
-                        onClick={() => setClauseProjectFilter(p.id)}
-                      >
-                        {p.name}
-                      </button>
-                    ))}
-                  </div>
-
-                  <div style={{ marginTop: 12 }}>
-                    <div className="panel-heading" style={{ marginBottom: 10 }}>
-                      <div className="section-kicker">RETRIEVED CONTRACT EVIDENCE CLAUSES</div>
-                      <span className="heading-count">{searchedClauses.length}</span>
-                    </div>
-
-                    {searchingClauses ? (
-                      <div className="empty-results"><RefreshCw size={16} className="spin" /> Searching pgvector vector store...</div>
-                    ) : searchedClauses.length === 0 ? (
-                      <div className="empty-results">No clauses matched your query. Try searching for "permit", "staffing", or "pricing".</div>
-                    ) : (
-                      searchedClauses.map((item, idx) => (
-                        <div key={idx} className="clause-card">
-                          <div className="clause-header">
-                            <div>
-                              <div className="clause-title">{item.section_title || 'Contract Clause'}</div>
-                              <div className="clause-doc">
-                                <FileText size={11} style={{ marginRight: 4, verticalAlign: -1 }} />
-                                {item.document_name || item.document_id} {item.page_number ? `· Page ${item.page_number}` : ''}
-                                {item.project_id && ` · Project ${item.project_id}`}
-                              </div>
-                            </div>
-                            <span className="evidence-badge badge-match">
-                              {Math.round(item.similarity_score * 100)}% Match
-                            </span>
-                          </div>
-                          <p className="clause-text">“{item.clause_text}”</p>
-                          {item.connection_rationale && (
-                            <div className="evidence-rationale">
-                              <strong>ML Risk Relevance: </strong>
-                              {item.connection_rationale}
-                            </div>
-                          )}
-                          <div className="clause-footer">
-                            <span style={{ color: '#7f8a81' }}>
-                              <Database size={11} style={{ marginRight: 4, verticalAlign: -1 }} />
-                              Vector Indexed (1536-dim)
-                            </span>
-                            <button
-                              type="button"
-                              className="text-link"
-                              onClick={() => {
-                                const found = projects.find((p) => p.id === item.project_id)
-                                if (found) setSelectedProject(found)
-                              }}
-                            >
-                              Open Project Risk Brief <ArrowRight size={12} />
-                            </button>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </>
-              )}
-
-              {docTab === 'upload' && (
-                <>
-                  <div className="upload-dropzone" onClick={handleSimulatedUpload}>
-                    <UploadCloud size={32} color="#357253" />
-                    <strong>Drop new contract PDF or addenda here to ingest</strong>
-                    <small>Supports PDF, DOCX up to 50MB. Text will be segmented into legal clauses and indexed into PostgreSQL pgvector.</small>
-                    <button type="button" className="secondary-button" style={{ marginTop: 6 }}>
-                      Select Document
-                    </button>
-                  </div>
-
-                  {uploadNotice && (
-                    <div className="insight-strip" style={{ marginTop: 10 }}>
-                      <div className="insight-icon"><Sparkles size={17} /></div>
-                      <p><strong>RAG Pipeline: </strong>{uploadNotice}</p>
-                    </div>
-                  )}
-
-                  <div className="panel" style={{ marginTop: 16 }}>
-                    <div className="panel-heading" style={{ padding: '14px 18px' }}>
-                      <div>
-                        <div className="section-kicker">INDEXED REPOSITORY</div>
-                        <h2>Uploaded Contract Documents</h2>
-                      </div>
-                    </div>
-                    <div className="table-scroll">
-                      <table className="project-table">
-                        <thead>
-                          <tr>
-                            <th>DOCUMENT</th>
-                            <th>PROJECT</th>
-                            <th>DATE</th>
-                            <th>EXTRACTED CLAUSES</th>
-                            <th>VECTOR STATUS</th>
-                            <th aria-label="Actions" />
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {uploadedContracts.map((doc) => (
-                            <tr key={doc.id}>
-                              <td>
-                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                  <FileText size={16} color="#457555" />
-                                  <div>
-                                    <strong>{doc.name}</strong>
-                                    <small style={{ display: 'block', color: '#8d958e' }}>{doc.size} · {doc.id}</small>
-                                  </div>
-                                </div>
-                              </td>
-                              <td>{doc.projectName}</td>
-                              <td>{doc.date}</td>
-                              <td><strong>{doc.clauses} clauses</strong></td>
-                              <td>
-                                <span className="evidence-badge badge-live">
-                                  <Database size={10} /> {doc.status}
-                                </span>
-                              </td>
-                              <td>
-                                <button
-                                  type="button"
-                                  className="text-link"
-                                  onClick={() => {
-                                    setDocTab('search')
-                                    setClauseProjectFilter(doc.project)
-                                  }}
-                                >
-                                  View Clauses <ArrowRight size={12} />
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          )}
-
-          {/* OVERVIEW & RISK SIGNALS VIEW */}
-          {activePage !== 'Documents' && (
+          {activePage === 'Overview' ? (
             <>
               <section className="metrics-grid" aria-label="Portfolio summary">
-                <article className="metric-card"><div className="metric-top"><span>ACTIVE PROJECTS</span><span className="metric-icon metric-icon-green"><BriefcaseBusiness size={16} /></span></div><div className="metric-value">12 <span className="metric-change positive"><ArrowUpRight size={14} /> 2</span></div><div className="metric-foot"><span>Across 8 agencies</span><span className="metric-trend">vs. last quarter</span></div></article>
-                <article className="metric-card"><div className="metric-top"><span>AT-RISK PROJECTS</span><span className="metric-icon metric-icon-red"><Activity size={16} /></span></div><div className="metric-value">03 <span className="metric-change negative"><ArrowUpRight size={14} /> 1</span></div><div className="metric-foot"><span>Require your attention</span><span className="metric-trend">of 12 active</span></div></article>
-                <article className="metric-card"><div className="metric-top"><span>PORTFOLIO VALUE</span><span className="metric-icon metric-icon-blue"><Wallet size={16} /></span></div><div className="metric-value">$842.6<span className="metric-unit">M</span> <span className="metric-change positive"><ArrowUpRight size={14} /> 4.2%</span></div><div className="metric-foot"><span>Total committed budget</span><span className="metric-trend">year over year</span></div></article>
-                <article className="metric-card"><div className="metric-top"><span>FORECAST ACCURACY</span><span className="metric-icon metric-icon-gold"><Sparkles size={16} /></span></div><div className="metric-value">91.4<span className="metric-unit">%</span> <span className="metric-change positive"><ArrowUpRight size={14} /> 2.8%</span></div><div className="metric-foot"><span>Model confidence</span><span className="metric-trend">last 90 days</span></div></article>
+                <article className="metric-card"><div className="metric-top"><span>Projects</span><span className="metric-icon metric-icon-green"><BriefcaseBusiness size={16} /></span></div><div className="metric-value">{projects.length || 4}</div><div className="metric-foot"><span>Active portfolio</span><span className="metric-trend">Spring Boot API</span></div></article>
+                <article className="metric-card"><div className="metric-top"><span>High schedule risk</span><span className="metric-icon metric-icon-red"><Activity size={16} /></span></div><div className="metric-value">{(attentionCount || 3).toString().padStart(2, '0')}</div><div className="metric-foot"><span>Delay risk ≥ 65%</span><span className="metric-trend">Action needed</span></div></article>
+                <article className="metric-card"><div className="metric-top"><span>Committed budget</span><span className="metric-icon metric-icon-blue"><Wallet size={16} /></span></div><div className="metric-value">₹{(totalBudget || 382.8).toFixed(1)}<span className="metric-unit">Cr</span></div><div className="metric-foot"><span>Visible contracts</span><span className="metric-trend">Total allocated</span></div></article>
+                <article className="metric-card"><div className="metric-top"><span>Milestones</span><span className="metric-icon metric-icon-gold"><Clock3 size={16} /></span></div><div className="metric-value">{projects.reduce((sum, project) => sum + project.milestones.length, 0) || 12}</div><div className="metric-foot"><span>Tracked deliverables</span><span className="metric-trend">Timeline sync</span></div></article>
               </section>
 
               <section className="insight-strip">
                 <div className="insight-icon"><Sparkles size={17} /></div>
                 <p>
                   <strong>Portfolio insight</strong>
-                  <span>3 projects show early signals of schedule slippage. Proactive action could protect <b>$12.4M</b> in committed value.</span>
+                  <span>3 projects show early signals of schedule slippage. Contractual delay notice required to mitigate damages.</span>
                 </p>
-                <button type="button" onClick={() => setActivePage('Risk signals')}>Review signals <ArrowRight size={15} /></button>
+                {projectById.get('CP-2048') && <button type="button" onClick={() => setSelectedProject(projectById.get('CP-2048') ?? null)}>Open brief <ArrowRight size={15} /></button>}
               </section>
 
               <section className="middle-grid">
                 <article className="panel forecast-panel">
                   <div className="panel-heading">
                     <div>
-                      <div className="section-kicker">PORTFOLIO HEALTH</div>
-                      <h2>Schedule performance</h2>
+                      <div className="section-kicker">SCHEDULE CHECK</div>
+                      <h2>Progress against baseline</h2>
                     </div>
                     <button className="select-button" type="button" onClick={() => setTimeframe(timeframe === '6 months' ? '12 months' : '6 months')}>
                       {timeframe}<ChevronDown size={14} />
                     </button>
                   </div>
-                  <div className="chart-summary"><strong>76<span>%</span></strong><span className="chart-summary-copy"><span className="chart-change"><ArrowDownRight size={14} /> 8.2%</span> projects tracking to plan</span></div>
-                  <div className="chart-legend"><span><i className="legend-dot legend-actual" /> Forecasted progress</span><span><i className="legend-dot legend-baseline" /> Planned progress</span></div>
+                  <div className="chart-summary"><strong>{latestPortfolioSnapshot?.actual ?? 62}<span>%</span></strong><span className="chart-summary-copy">portfolio actual vs planned progress</span></div>
+                  <div className="chart-legend"><span><i className="legend-dot legend-actual" /> Actual progress</span><span><i className="legend-dot legend-baseline" /> Planned progress</span></div>
                   <div className="chart-wrap">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={forecast} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
-                        <defs>
-                          <linearGradient id="progressFill" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="0%" stopColor="#27765f" stopOpacity={0.17} />
-                            <stop offset="100%" stopColor="#27765f" stopOpacity={0} />
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid stroke="#e9ece7" strokeDasharray="3 5" vertical={false} />
-                        <XAxis dataKey="month" axisLine={false} tickLine={false} tick={{ fill: '#8b918c', fontSize: 11 }} dy={9} />
-                        <YAxis axisLine={false} tickLine={false} tick={{ fill: '#8b918c', fontSize: 10 }} tickFormatter={(value: number) => `${value}%`} />
-                        <Tooltip contentStyle={{ border: '1px solid #e6e9e3', borderRadius: 8, fontSize: 12 }} />
-                        <Area type="monotone" dataKey="baseline" stroke="#bbc4bd" strokeWidth={1.5} strokeDasharray="5 5" fill="none" name="Planned progress" />
-                        <Area type="monotone" dataKey="projected" stroke="#27765f" strokeWidth={2.5} fill="url(#progressFill)" name="Forecasted progress" />
-                      </AreaChart>
-                    </ResponsiveContainer>
+                    {portfolioHistory.length ? (
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={portfolioHistory} margin={{ top: 8, right: 8, left: -20, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="progressFill" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="0%" stopColor="#27765f" stopOpacity={0.17} />
+                              <stop offset="100%" stopColor="#27765f" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid stroke="#e9ece7" strokeDasharray="3 5" vertical={false} />
+                          <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#8b918c', fontSize: 9 }} tickFormatter={(date: string) => date.slice(5)} dy={9} />
+                          <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{ fill: '#8b918c', fontSize: 10 }} tickFormatter={(value: number) => `${value}%`} />
+                          <Tooltip labelFormatter={(date) => `As of ${String(date)}`} contentStyle={{ border: '1px solid #e6e9e3', borderRadius: 8, fontSize: 12 }} />
+                          <Area type="monotone" dataKey="planned" stroke="#bbc4bd" strokeWidth={1.5} strokeDasharray="5 5" fill="none" name="Planned progress" />
+                          <Area type="monotone" dataKey="actual" stroke="#27765f" strokeWidth={2.5} fill="url(#progressFill)" name="Actual progress" />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    ) : (
+                      <div className="empty-results">No progress snapshots yet.</div>
+                    )}
                   </div>
                 </article>
 
@@ -614,26 +547,20 @@ function App() {
                     <button className="text-link" type="button" onClick={() => setActivePage('Risk signals')}>View all <ArrowRight size={14} /></button>
                   </div>
                   <div className="signal-list">
-                    <button className="signal-row" type="button" onClick={() => { setSelectedProject(projects[0]); setSelectedFactorIndex(0) }}>
-                      <span className="signal-severity severity-high" />
-                      <span className="signal-copy"><strong>Schedule slippage likely</strong><small>East River Flood Barrier <i>·</i> 2h ago</small></span>
-                      <span className="signal-score">78<span>%</span></span>
-                      <ArrowRight className="signal-arrow" size={15} />
-                    </button>
-                    <button className="signal-row" type="button" onClick={() => { setSelectedProject(projects[1]); setSelectedFactorIndex(0) }}>
-                      <span className="signal-severity severity-medium" />
-                      <span className="signal-copy"><strong>Material cost variance</strong><small>I-405 Sound Wall Expansion <i>·</i> 5h ago</small></span>
-                      <span className="signal-score score-medium">56<span>%</span></span>
-                      <ArrowRight className="signal-arrow" size={15} />
-                    </button>
-                    <button className="signal-row" type="button" onClick={() => { setSelectedProject(projects[3]); setSelectedFactorIndex(1) }}>
-                      <span className="signal-severity severity-medium" />
-                      <span className="signal-copy"><strong>Budget burn ahead of plan</strong><small>South County Water Main <i>·</i> Yesterday</small></span>
-                      <span className="signal-score score-medium">47<span>%</span></span>
-                      <ArrowRight className="signal-arrow" size={15} />
-                    </button>
+                    {[
+                      { project: projectById.get('CP-2048'), title: 'Permit review is holding up foundation work' },
+                      { project: projectById.get('CP-1932'), title: 'Material costs are trending above estimate' },
+                      { project: projectById.get('CP-1764'), title: 'Spend is ahead of completed work' },
+                    ].filter((signal) => signal.project?.riskScoresAvailable).map(({ project, title }) => project && (
+                      <button className="signal-row" key={project.id} type="button" onClick={() => { setSelectedProject(project); setSelectedFactorIndex(0) }}>
+                        <span className={`signal-severity ${project.delayRisk >= 65 ? 'severity-high' : 'severity-medium'}`} />
+                        <span className="signal-copy"><strong>{title}</strong><small>{project.name} <i>·</i> {project.status}</small></span>
+                        <span className={`signal-score ${project.delayRisk >= 65 ? '' : 'score-medium'}`}>{project.delayRisk}<span>%</span></span>
+                        <ArrowRight className="signal-arrow" size={15} />
+                      </button>
+                    ))}
                   </div>
-                  <div className="signal-footer"><ShieldCheck size={14} /><span>Signals reviewed by ML & verified against contract terms</span></div>
+                  <div className="signal-footer"><ShieldCheck size={14} /><span>Signals verified with legal contract evidence</span></div>
                 </article>
               </section>
 
@@ -641,12 +568,11 @@ function App() {
                 <div className="panel-heading projects-heading">
                   <div>
                     <div className="section-kicker">PORTFOLIO MONITOR</div>
-                    <h2>Project performance <span className="heading-count">12</span></h2>
+                    <h2>Project performance <span className="heading-count">{projects.length}</span></h2>
                   </div>
                   <div className="project-actions">
-                    <button className="filter-button" type="button" onClick={() => setSearch(search ? '' : 'East')}>
-                      <Activity size={14} /> Filter
-                    </button>
+                    <button className="filter-button" type="button" onClick={() => setAddProjectOpen(true)}><Plus size={14} /> Add project</button>
+                    <button className="filter-button" type="button" onClick={() => setSearch(search ? '' : 'East')}><Activity size={14} /> Filter</button>
                     <button className="text-link" type="button" onClick={() => setActivePage('Projects')}>All projects <ArrowRight size={14} /></button>
                   </div>
                 </div>
@@ -654,14 +580,7 @@ function App() {
                   <table className="project-table">
                     <thead>
                       <tr>
-                        <th>PROJECT</th>
-                        <th>CONTRACTOR</th>
-                        <th>BUDGET</th>
-                        <th>PROGRESS</th>
-                        <th>DELAY RISK</th>
-                        <th>COST RISK</th>
-                        <th>STATUS</th>
-                        <th aria-label="Actions" />
+                        <th>PROJECT</th><th>CONTRACTOR</th><th>BUDGET</th><th>PROGRESS</th><th>DELAY RISK</th><th>COST RISK</th><th>STATUS</th><th aria-label="Actions" />
                       </tr>
                     </thead>
                     <tbody>
@@ -683,17 +602,21 @@ function App() {
                           </td>
                           <td>
                             <div className="risk-cell">
-                              <span className={`risk-number ${project.delayRisk >= 65 ? 'risk-high' : project.delayRisk >= 40 ? 'risk-mid' : 'risk-low'}`}>{project.delayRisk}%</span>
+                              <span className={`risk-number ${project.riskScoresAvailable ? project.delayRisk >= 65 ? 'risk-high' : project.delayRisk >= 40 ? 'risk-mid' : 'risk-low' : ''}`}>
+                                {project.riskScoresAvailable ? `${project.delayRisk}%` : '—'}
+                              </span>
                               <div className="risk-track">
-                                <span className={project.delayRisk >= 65 ? 'track-high' : project.delayRisk >= 40 ? 'track-mid' : 'track-low'} style={{ width: `${project.delayRisk}%` }} />
+                                <span className={project.delayRisk >= 65 ? 'track-high' : project.delayRisk >= 40 ? 'track-mid' : 'track-low'} style={{ width: `${project.riskScoresAvailable ? project.delayRisk : 0}%` }} />
                               </div>
                             </div>
                           </td>
                           <td>
                             <div className="risk-cell">
-                              <span className={`risk-number ${project.costRisk >= 65 ? 'risk-high' : project.costRisk >= 40 ? 'risk-mid' : 'risk-low'}`}>{project.costRisk}%</span>
+                              <span className={`risk-number ${project.riskScoresAvailable ? project.costRisk >= 65 ? 'risk-high' : project.costRisk >= 40 ? 'risk-mid' : 'risk-low' : ''}`}>
+                                {project.riskScoresAvailable ? `${project.costRisk}%` : '—'}
+                              </span>
                               <div className="risk-track">
-                                <span className={project.costRisk >= 65 ? 'track-high' : project.costRisk >= 40 ? 'track-mid' : 'track-low'} style={{ width: `${project.costRisk}%` }} />
+                                <span className={project.costRisk >= 65 ? 'track-high' : project.costRisk >= 40 ? 'track-mid' : 'track-low'} style={{ width: `${project.riskScoresAvailable ? project.costRisk : 0}%` }} />
                               </div>
                             </div>
                           </td>
@@ -710,29 +633,41 @@ function App() {
                   {visibleProjects.length === 0 && <div className="empty-results">No projects match “{search}”.</div>}
                 </div>
                 <div className="table-footer">
-                  <span>Showing <strong>{visibleProjects.length}</strong> of <strong>12</strong> projects</span>
+                  <span>Showing <strong>{visibleProjects.length}</strong> of <strong>{projects.length}</strong> projects</span>
                   <button type="button" onClick={() => setActivePage('Projects')}>View portfolio <ArrowRight size={14} /></button>
                 </div>
               </section>
+
+              <footer className="dashboard-footer">
+                <span><span className="live-dot" /> Portfolio synced via Spring Boot API</span>
+                <span>Decision support with AI evidence retrieval</span>
+              </footer>
+            </>
+          ) : (
+            <>
+              {activePage === 'Projects' && <ProjectsPage projects={visibleProjects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} onAddProject={() => setAddProjectOpen(true)} />}
+              {activePage === 'Risk signals' && <RiskSignalsPage projects={visibleProjects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} />}
+              {activePage === 'Documents' && <DocumentsPage projects={projects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} />}
+              {activePage === 'Contractors' && <ContractorsPage projects={visibleProjects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} />}
+              {activePage === 'Budget & spend' && <BudgetPage projects={visibleProjects} onSelectProject={setSelectedProject} onGoToProjects={() => setActivePage('Projects')} />}
+              {activePage === 'Help center' && <HelpPage onGoToProjects={() => setActivePage('Projects')} />}
             </>
           )}
-
-          <footer className="dashboard-footer">
-            <span><span className="live-dot" /> Live portfolio data <i>·</i> Last synced 12 minutes ago</span>
-            <span>ContractPulse AI <i>·</i> Decision support, with you in control</span>
-          </footer>
         </div>
       </main>
 
-      {/* PROJECT RISK BRIEF & CONTRACT EVIDENCE DRAWER */}
+      {/* PROJECT RISK BRIEF & RAG EVIDENCE DRAWER */}
       {selectedProject && (
         <div className="drawer-backdrop" onClick={() => setSelectedProject(null)}>
           <aside className="project-drawer" onClick={(event) => event.stopPropagation()}>
             <div className="drawer-top">
-              <span className="drawer-label">PROJECT RISK BRIEF</span>
-              <button className="icon-button" type="button" aria-label="Close details" onClick={() => setSelectedProject(null)}>
-                <X size={19} />
-              </button>
+              <span className="drawer-label">PROJECT RISK BRIEF · RAG EVIDENCE</span>
+              <div className="drawer-top-actions">
+                <button className="secondary-button" type="button" onClick={deleteProject}>Delete project</button>
+                <button className="icon-button" type="button" aria-label="Close details" onClick={() => setSelectedProject(null)}>
+                  <X size={19} />
+                </button>
+              </div>
             </div>
 
             <div className="drawer-project">
@@ -745,27 +680,105 @@ function App() {
 
             <div className="drawer-risk-summary">
               <div className="risk-dial">
-                <strong>{selectedProject.delayRisk}<span>%</span></strong>
-                <small>delay likelihood</small>
+                <strong>{selectedProject.riskScoresAvailable ? `${selectedProject.delayRisk}%` : '—'}</strong>
+                <small>{selectedProject.riskScoresAvailable ? 'delay likelihood' : 'not scored'}</small>
               </div>
               <div>
                 <span className={`status-pill status-${selectedProject.color}`}><i />{selectedProject.status}</span>
-                <p>Cost overrun risk <strong>{selectedProject.costRisk}%</strong></p>
-                <p>Model confidence <strong>91%</strong></p>
-                <small>ML Risk Signal updated recently</small>
+                <p>Cost overrun risk <strong>{selectedProject.riskScoresAvailable ? `${selectedProject.costRisk}%` : 'Not scored'}</strong></p>
+                <p>Contractor <strong>{selectedProject.contractor}</strong></p>
+                <small>Connected to pgvector evidence store</small>
               </div>
             </div>
 
             <div className="drawer-section">
-              <div className="section-kicker">UPCOMING MILESTONE</div>
-              <div className="factor-row">
-                <span className="factor-rank"><Clock3 size={13} /></span>
-                <span><strong>{selectedProject.milestone}</strong><small>Due {selectedProject.due}</small></span>
+              <div className="section-kicker">FEATURE ENGINEERING · METRICS</div>
+              {(() => {
+                const features = calculateProjectFeatures(selectedProject)
+                return (
+                  <div className="feature-grid">
+                    <article>
+                      <small>Progress variance</small>
+                      <strong className={features.progressVariance < 0 ? 'feature-negative' : 'feature-positive'}>
+                        {features.progressVariance > 0 ? '+' : ''}{features.progressVariance} pp
+                      </strong>
+                      <span>Actual {selectedProject.progress}% − planned {selectedProject.plannedProgress}%</span>
+                    </article>
+                    <article>
+                      <small>Schedule variance</small>
+                      <strong className={features.scheduleVarianceDays !== null && features.scheduleVarianceDays > 0 ? 'feature-negative' : 'feature-positive'}>
+                        {features.scheduleVarianceDays === null ? 'Unavailable' : `${features.scheduleVarianceDays > 0 ? '+' : ''}${features.scheduleVarianceDays} days`}
+                      </strong>
+                      <span>Forecast finish vs baseline finish</span>
+                    </article>
+                  </div>
+                )
+              })()}
+            </div>
+
+            <div className="drawer-section">
+              <div className="drawer-section-heading">
+                <div className="section-kicker">PROGRESS HISTORY</div>
+                <button className="filter-button" type="button" onClick={() => setProgressDialogOpen(true)}>
+                  <Plus size={13} /> Record update
+                </button>
+              </div>
+              <p className="feature-note">Latest snapshot: {selectedProject.progressAsOfDate}. Synced with Spring Boot.</p>
+              <div className="drawer-progress-chart">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={selectedProject.progressHistory} margin={{ top: 10, right: 8, left: -18, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="projectProgressFill" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0%" stopColor="#27765f" stopOpacity={0.14} />
+                        <stop offset="100%" stopColor="#27765f" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid stroke="#e9ece7" strokeDasharray="3 5" vertical={false} />
+                    <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fill: '#8b918c', fontSize: 8 }} tickFormatter={(date: string) => date.slice(5)} />
+                    <YAxis domain={[0, 100]} axisLine={false} tickLine={false} tick={{ fill: '#8b918c', fontSize: 8 }} tickFormatter={(value: number) => `${value}%`} />
+                    <Tooltip labelFormatter={(date) => `As of ${String(date)}`} formatter={(value, name) => [`${Number(value)}%`, name === 'actual' ? 'Actual progress' : 'Planned progress']} contentStyle={{ border: '1px solid #e6e9e3', borderRadius: 6, fontSize: 10 }} />
+                    <Area type="monotone" dataKey="planned" stroke="#bbc4bd" strokeWidth={1.5} strokeDasharray="5 5" fill="none" name="Planned progress" dot={{ r: 3 }} />
+                    <Area type="monotone" dataKey="actual" stroke="#27765f" strokeWidth={2} fill="url(#projectProgressFill)" name="Actual progress" dot={{ r: 3 }} />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
             </div>
 
             <div className="drawer-section">
-              <div className="section-kicker">WHY THIS PROJECT IS AT RISK (SELECT FACTOR TO LINK EVIDENCE)</div>
+              <div className="drawer-section-heading">
+                <div className="section-kicker">MILESTONES & DELAY</div>
+                <button className="filter-button" type="button" onClick={() => setMilestoneDialogOpen(true)}>
+                  <Plus size={13} /> Add milestone
+                </button>
+              </div>
+              <div className="milestone-table-wrap">
+                <table className="milestone-table">
+                  <thead>
+                    <tr><th>Milestone</th><th>Planned</th><th>Delay</th><th>Status</th></tr>
+                  </thead>
+                  <tbody>
+                    {calculateProjectFeatures(selectedProject).milestoneDelays.map((milestone) => (
+                      <tr key={milestone.id}>
+                        <td>{milestone.name}</td>
+                        <td>{milestone.plannedFinishDate}</td>
+                        <td>{milestone.delayDays === null ? '—' : `${milestone.delayDays > 0 ? '+' : ''}${milestone.delayDays}d`}</td>
+                        <td>
+                          <select aria-label={`Status for ${milestone.name}`} value={milestone.status} onChange={(event) => updateMilestoneStatus(milestone.id, event.target.value as MilestoneStatus)}>
+                            <option>Not started</option>
+                            <option>In progress</option>
+                            <option>Complete</option>
+                          </select>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* WHY THIS PROJECT IS AT RISK (SELECT FACTOR TO CONNECT CONTRACT EVIDENCE) */}
+            <div className="drawer-section">
+              <div className="section-kicker">WHY THIS PROJECT IS AT RISK (SELECT FACTOR)</div>
               {factorsForSelected.map((factor, idx) => (
                 <div
                   key={idx}
@@ -783,7 +796,7 @@ function App() {
               ))}
             </div>
 
-            {/* DYNAMIC CONTRACT EVIDENCE CITATION (CONNECTED VIA RAG) */}
+            {/* SUPPORTING CONTRACT EVIDENCE CITATION (CONNECTED VIA RAG) */}
             <div className="evidence-card">
               <div className="evidence-icon"><FileText size={17} /></div>
               <div style={{ flex: 1, minWidth: 0 }}>
@@ -819,12 +832,10 @@ function App() {
                       type="button"
                       onClick={() => {
                         setActivePage('Documents')
-                        setClauseSearchQuery(factorsForSelected[selectedFactorIndex]?.title || '')
-                        setClauseProjectFilter(selectedProject.id)
                         setSelectedProject(null)
                       }}
                     >
-                      View all clauses for this project <ArrowRight size={13} />
+                      View documents & clauses <ArrowRight size={13} />
                     </button>
                   </>
                 ) : (
@@ -842,7 +853,7 @@ function App() {
               ) : (
                 <div className="recommendation-card">
                   <div className="recommendation-title"><Sparkles size={16} /><strong>Recommended next step</strong></div>
-                  <p>Schedule an agency coordination meeting to resolve permit blockers before the {selectedProject.due} milestone.</p>
+                  <p>Schedule an agency coordination meeting to resolve permit blockers before the milestone target.</p>
                   <span>Potential impact <b>Recover 2–3 weeks</b></span>
                 </div>
               )}
@@ -869,6 +880,10 @@ function App() {
           </aside>
         </div>
       )}
+
+      {addProjectOpen && <AddProjectDialog onClose={() => setAddProjectOpen(false)} onSubmit={addProject} />}
+      {progressDialogOpen && <ProgressUpdateDialog onClose={() => setProgressDialogOpen(false)} onSubmit={updateProjectProgress} />}
+      {milestoneDialogOpen && <AddMilestoneDialog onClose={() => setMilestoneDialogOpen(false)} onSubmit={addMilestone} />}
     </div>
   )
 }

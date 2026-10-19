@@ -2,7 +2,9 @@
 
 > **AI-Powered Infrastructure Contract Intelligence, ML Risk Prediction, and pgvector Evidence Retrieval**
 
-ContractPulse AI is an enterprise-grade platform designed for monitoring post-award public infrastructure contracts. It bridges machine learning risk models (schedule slippage, cost overruns, staffing deficits, weather downtime) with legally binding contract evidence clauses using **Retrieval-Augmented Generation (RAG)** on **PostgreSQL with pgvector**.
+ContractPulse AI is an enterprise-grade platform designed for monitoring post-award public infrastructure contracts. It combines interactive portfolio monitoring with a Spring Boot REST API, feature engineering metrics, and **Retrieval-Augmented Generation (RAG)** on **PostgreSQL with pgvector** to bridge machine learning risk models with legally binding contract evidence clauses.
+
+Budget examples are displayed in Indian rupees (INR) using crore units for evaluation and demonstration.
 
 ---
 
@@ -13,10 +15,11 @@ ContractPulse AI is an enterprise-grade platform designed for monitoring post-aw
                       │    React 19 + TypeScript + Vite UI     │
                       │  (Portfolio Dashboard & Evidence View) │
                       └──────────────────┬─────────────────────┘
-                                         │ HTTP REST
+                                         │ HTTP REST (/api/...)
                                          ▼
                       ┌────────────────────────────────────────┐
                       │    Spring Boot 3.3.x Backend (Java)    │
+                      │   - Project & Milestone CRUD Service   │
                       │   - MLEvidenceService (Semantic RAG)   │
                       │   - DocumentIntelligenceService        │
                       │   - StorageService (MinIO / S3)        │
@@ -41,7 +44,7 @@ ContractPulse AI is an enterprise-grade platform designed for monitoring post-aw
 - **Solution**: The `POST /api/ml/connect-evidence` service receives predicted risk metrics (`project_id`, `risk_type`, `risk_description`, `risk_score`) and queries `pgvector` using cosine distance (`<=>`) to retrieve the governing contract clauses.
 - **Explainability**: Automatically generates an operational/legal connection rationale explaining *why* the contract clause holds the contractor liable and what mitigation timelines apply.
 
-### 2. Document Intelligence & Retrieval
+### 2. Document Intelligence & Semantic Retrieval
 - **Document Ingestion**: Uploads contract agreements (PDF/DOCX) into MinIO/S3 object storage.
 - **Clause Segmentation**: Parses contract documents into granular numbered clauses, extracts metadata (page numbers, section titles), and creates 1536-dimensional vector embeddings.
 - **Semantic Clause Search**: Dedicated search interface to query clauses across contracts (e.g. "environmental permit lag", "steel escalation index", "hydrostatic pressure test").
@@ -49,6 +52,7 @@ ContractPulse AI is an enterprise-grade platform designed for monitoring post-aw
 ### 3. Executive Decision Support Dashboard
 - **Portfolio Health & Forecasts**: Real-time progress baseline vs. projected completion charts powered by Recharts.
 - **Interactive Risk Factor Drill-down**: Click on any project or risk signal to open the **Project Risk Brief**, dynamically inspect governing contract clauses, and approve/dismiss AI recommendations with audit logging.
+- **Feature Engineering & CRUD**: Add projects, record progress updates, and update milestones live with calculation of progress variance and schedule variance.
 
 ---
 
@@ -85,21 +89,17 @@ docker run --name pgvector-db -e POSTGRES_PASSWORD=password -e POSTGRES_DB=contr
 ---
 
 ### 3. Run the Spring Boot Backend
-Navigate to the `backend-spring` directory:
+Navigate to the `backend-spring` (or `backend`) directory:
 ```powershell
 cd backend-spring
-```
-
-Run with the Maven wrapper:
-```powershell
 .\mvnw.cmd spring-boot:run
 ```
-*(Or open `backend-spring` in IntelliJ IDEA / VS Code / Eclipse and run `ContractPulseApplication.java`)*.
+*(Or open the project in IntelliJ IDEA / VS Code / Eclipse and run `ContractPulseApplication.java`)*.
 
 The backend will start on **`http://localhost:8080`**.
 On startup, it automatically:
 - Executes `CREATE EXTENSION IF NOT EXISTS vector` in PostgreSQL.
-- Seeds realistic contract clauses and metadata for the 4 demo projects if the database is empty.
+- Seeds realistic contract clauses and metadata for the demo projects if the database is empty.
 
 ---
 
@@ -149,23 +149,20 @@ Open your browser at **`http://localhost:5173`**.
 - **Method & Path**: `GET /api/documents/clauses?q={searchQuery}&project_id={projectId}`
 - **Response**: List of clauses matched via vector semantic similarity.
 
-### 3. Ingest Contract Document
-- **Method & Path**: `POST /api/documents/upload`
-- **Content-Type**: `multipart/form-data`
-- **Parameters**: `file`, `project_id`, `uploaded_by`
-
-### 4. Health Check
-- **Method & Path**: `GET /api/health`
-- **Response**: `{"status": "UP", "service": "ContractPulse AI Spring Boot Backend", "rag_engine": "PostgreSQL + pgvector"}`
+### 3. Project & Milestone Management
+- `GET /api/projects`: List all portfolio projects.
+- `POST /api/projects`: Create a new project.
+- `PUT /api/projects/{id}`: Update project information.
+- `DELETE /api/projects/{id}`: Remove a project.
+- `POST /api/projects/{id}/progress`: Record a progress snapshot.
+- `POST /api/projects/{id}/milestones`: Add a milestone.
 
 ---
 
-## Testing the ML Pipeline Directly via Python
-
-A standalone script is provided in `backend/simulate_ml_model.py` to simulate an automated ML model sending predictions and retrieving contract citations:
-```powershell
-python backend/simulate_ml_model.py
-```
+## Additional Documentation
+- [docs/PROJECT_EVALUATION_GUIDE.md](docs/PROJECT_EVALUATION_GUIDE.md): Walkthrough, project explanation, limitations, and Q&A.
+- [docs/FRONTEND_IMPLEMENTATION.md](docs/FRONTEND_IMPLEMENTATION.md): Technical description of frontend files, structure, and state.
+- [docs/PROJECT_WORKFLOW.md](docs/PROJECT_WORKFLOW.md): Step-by-step user journey from portfolio review to project decisions.
 
 ---
 
